@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "dagon"
+version = "0.9.9"
+description = "An asynchronous DAG-based task execution platform"
+authors = ["vector-of-bool <vectorofbool@gmail.com>"]
+packages = [
+    { include = "dagon" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+typing-extensions = "^4.0.1"
+
+[tool.poetry.dev-dependencies]
+yapf = "^0.31.0"
+pyright = "^0.0.13"
+pylint = "^2.12.2"
+pytest = "^6.2.5"
+tox = "^3.24.4"
+Sphinx = "^4.3.1"
+sphinx-autodoc-typehints = "^1.12.0"
+pytest-asyncio = "^0.16.0"
+pytest-xdist = "^2.5.0"
+litecli = "^1.6.0"
+
+[tool.pyright]
+include = ["dagon/"]
+strict = ["**"]
+typeshed-path = "typings"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error"
+]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

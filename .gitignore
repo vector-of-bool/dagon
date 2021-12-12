@@ -1,0 +1,14 @@
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+.tox/
+.env/
+.venv/
+.python-version
+docs/_build
+build/
+dist/
+*.egg-info/
+.vscode/
+*.db
+.idea/
