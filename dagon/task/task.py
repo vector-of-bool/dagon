@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import (TYPE_CHECKING, Any, Awaitable, Callable, Generic, Iterable, NamedTuple, Union)
+from typing import (TYPE_CHECKING, Any, Awaitable, Callable, Generic, Iterable, NamedTuple, Sequence, Union)
 
 from dagon.util import NoneSuch, T
 
@@ -39,7 +39,7 @@ class Task(Generic[T]):
         self._doc = doc
         self._fn = fn
         self._deps = tuple(deps)
-        self._default_enabeld = default
+        self._is_default = default
         self._disabled_reason = disabled_reason
 
     @property
@@ -58,9 +58,24 @@ class Task(Generic[T]):
         return self._fn
 
     @property
-    def depends(self) -> Iterable[Dependency]:
+    def depends(self) -> Sequence[Dependency]:
         """The dependencies (by name) of this task"""
-        return iter(self._deps)
+        return self._deps
+
+    @property
+    def is_disabled(self):
+        """Whether this task is disabled"""
+        return self.disabled_reason is not None
+
+    @property
+    def disabled_reason(self) -> str | None:
+        """The explanation of why this task is disabled (or None if it is not disabled)"""
+        return self._disabled_reason
+
+    @property
+    def is_default(self):
+        """Whether this task is marked as a default task"""
+        return self._is_default
 
     if not TYPE_CHECKING:
 

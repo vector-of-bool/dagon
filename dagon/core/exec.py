@@ -170,7 +170,7 @@ class SimpleExecutor(Generic[TaskT]):
             # Cancellation
             return TaskResult(task_, TaskCancellation())
         except:  # pylint: disable=bare-except
-            # An exception came from the  Bad
+            # An exception came from the task
             exc_info = sys.exc_info()
             assert exc_info[0]
             exc_info = cast(ExceptionInfo, exc_info)

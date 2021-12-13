@@ -1,10 +1,10 @@
 import itertools
 
+import dagon.task as mod
 from dagon.util.testing import async_test
 
-from . import builder as mod
 from .dag import TaskDAG, result_from
-from .result import TaskResult, TaskSuccess
+from ..core.result import TaskResult, TaskSuccess
 
 # pyright: reportUnusedFunction=false
 
@@ -73,7 +73,7 @@ async def _run_oo_test(use_oo_deps: bool) -> None:
         nonlocal value
         value = 1
 
-    @mod.define_in(dag, order_only_deps=[_first])
+    @mod.define_in(dag, order_only_dependss=[_first])
     async def _second() -> None:
         nonlocal value
         if use_oo_deps:
@@ -97,7 +97,7 @@ async def _run_oo_test(use_oo_deps: bool) -> None:
 
 @async_test
 async def test_order_only() -> None:
-    for _, use_oo_deps in itertools.product(range(10), (True, False)):
+    for _, use_oo_deps in itertools.product(range(100), (True, False)):
         # Run this repeatedly to try and force the ordering to fail
         await _run_oo_test(use_oo_deps)
 

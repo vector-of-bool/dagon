@@ -3,17 +3,22 @@ from __future__ import annotations
 import contextvars
 import difflib
 import itertools
-from typing import Any, Awaitable, Iterable, Mapping, TypeVar, cast, overload
+from contextlib import contextmanager
+from typing import (Any, Awaitable, Callable, Iterable, Iterator, Mapping, TypeVar, cast, overload)
 
+from dagon.core import exec, task_graph
+from dagon.core.result import TaskResult, TaskSuccess
 from dagon.util import NoneSuch, Opaque
 
-from . import exec, task_graph
-from .result import TaskResult, TaskSuccess
 from .task import InvalidTask, Task
 
 T = TypeVar('T')
 
 _OpaqueTask = Task[Opaque]
+
+
+async def default_execute(task: Task[T]) -> T:
+    return await task.function()
 
 
 class TaskDAG:
@@ -47,10 +52,24 @@ class TaskDAG:
                 continue
             yield from self._collect(d.dep_name)
 
-    async def execute(self, marks: Iterable[str]) -> set[TaskResult[_OpaqueTask]]:
-        tasks = set(itertools.chain.from_iterable(self._collect(m) for m in marks))
-        ex = _DagExecutor(tasks)
-        return await ex.execute()
+    def create_executor(self,
+                        marks: Iterable[str],
+                        *,
+                        exec_fn: Callable[[Task[T]], Awaitable[T]] = default_execute) -> exec.SimpleExecutor[Task[Any]]:
+        by_name = {t.name: t for t in (itertools.chain.from_iterable(self._collect(m) for m in marks))}
+        graph = task_graph.TaskGraph(
+            nodes=by_name.values(),
+            edges=itertools.chain.from_iterable(
+                ((by_name[d.dep_name], t) for d in t.depends if d.dep_name in by_name) for t in by_name.values()),
+        )
+        return TaskExecutor(graph, exec_fn=exec_fn)
+
+    async def execute(self,
+                      marks: Iterable[str],
+                      *,
+                      exec_fn: Callable[[Task[T]], Awaitable[T]] = default_execute) -> set[TaskResult[Task[Any]]]:
+        ex = self.create_executor(marks, exec_fn=exec_fn)
+        return await ex.run_all()
 
 
 _TaskResultMapType = Mapping[str, Awaitable[TaskResult[_OpaqueTask]]]
@@ -82,23 +101,16 @@ async def result_from(t: str | Task[Any]) -> Any:
     return res.value
 
 
-class _DagExecutor:
-    def __init__(self, tasks: Iterable[_OpaqueTask]):
-        self._tasks = {t.name: t for t in tasks}
-        self._graph = task_graph.TaskGraph(
-            nodes=self._tasks.values(),
-            edges=itertools.chain.from_iterable(((self._tasks[d.dep_name], t) for d in t.depends
-                                                 if d.dep_name in self._tasks) for t in self._tasks.values()),
-        )
-        self._executor = exec.SimpleExecutor(self._graph, self._run_task)
+class TaskExecutor(exec.SimpleExecutor[_OpaqueTask]):
+    def __init__(self, graph: task_graph.TaskGraph[_OpaqueTask], exec_fn: Callable[[Task[T]], Awaitable[T]]):
+        super().__init__(graph, self.__exec_task)
+        self._by_name = {t.name: t for t in graph.all_nodes}
+        self._exec = exec_fn
 
-    async def execute(self) -> set[TaskResult[_OpaqueTask]]:
-        return await self._executor.run_all()
-
-    async def _run_task(self, task: _OpaqueTask) -> Opaque:
+    async def __exec_task(self, task: _OpaqueTask) -> Opaque:
         resmap = self._create_partial_result_map(task)
         set_current_task_results(resmap)
-        return await task.function()
+        return await self._exec(task)
 
     def _create_partial_result_map(self, task: _OpaqueTask) -> _TaskResultMapType:
         """
@@ -106,8 +118,43 @@ class _DagExecutor:
         correspond to those dependency tasks.
         """
         return {
-            dep.dep_name: self._executor.result_of(self._tasks[dep.dep_name])
+            dep.dep_name: self.result_of(self._by_name[dep.dep_name])
             for dep in task.depends
             # order-only deps do not get a result entry
             if not dep.is_order_only
         }
+
+
+_CURRENT_DAG = contextvars.ContextVar['TaskDAG | None']('_CURRENT_DAG', default=None)
+
+
+def current_dag() -> TaskDAG:
+    """
+    Get the current thread/task-local Dag instance.
+    """
+    dag = _CURRENT_DAG.get()
+    if dag is None:
+        raise RuntimeError('There is no dag set for the current thread')
+    return dag
+
+
+def set_current_dag(dag: TaskDAG | None) -> None:
+    """
+    Set the current thread-local Dag instance.
+    """
+    _CURRENT_DAG.set(dag)
+
+
+@contextmanager
+def populate_dag_context(dag: TaskDAG) -> Iterator[None]:
+    """
+    Set the current thread-local Dag to ``dag``, and then restore the old
+    thread-local Dag value when the context manager exists.
+
+    :rtype: ContextManager[None]
+    """
+    tok = _CURRENT_DAG.set(dag)
+    try:
+        yield
+    finally:
+        _CURRENT_DAG.reset(tok)

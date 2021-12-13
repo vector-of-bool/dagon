@@ -70,7 +70,7 @@ class EventWaiter:
 
 
 @pytest.mark.asyncio
-async def test_exec_2():
+async def test_exec():
     lens = CalcLengths()
     graph = TaskGraph[str](nodes=['foo', 'bar', 'baz'], edges=[('foo', 'bar'), ('bar', 'baz')])
     exe = exec.SimpleExecutor(graph, lens.save_length)

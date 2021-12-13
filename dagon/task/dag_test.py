@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from . import dag as dag_mod
-from .result import TaskResult, TaskSuccess
+from dagon.core.result import TaskResult, TaskSuccess
 from .task import Dependency, Task
 
 
