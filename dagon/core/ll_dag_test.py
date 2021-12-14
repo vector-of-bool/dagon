@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from . import task_graph
+from . import ll_dag
 
-StringGraph = task_graph.TaskGraph[str]
+StringGraph = ll_dag.LowLevelDAG[str]
 
 
 def test_create_empty():
@@ -86,9 +86,9 @@ def test_detect_cycles():
         ('foo', 'baz'),
         ('baz', 'quux'),
     ])
-    with pytest.raises(task_graph.CycleError, match="['quux', 'baz', 'quux']"):
+    with pytest.raises(ll_dag.CycleError, match="['quux', 'baz', 'quux']"):
         g.add(edges=[('quux', 'baz')])
-    with pytest.raises(task_graph.CycleError, match="['quux', 'baz', 'foo', 'quux']"):
+    with pytest.raises(ll_dag.CycleError, match="['quux', 'baz', 'foo', 'quux']"):
         g.add(edges=[('quux', 'foo')])
     g.add(edges=[('quux', 'bar')])
 
@@ -99,9 +99,9 @@ def test_detect_cycles_2():
         ('foo', 'bar'),
         ('bar', 'baz'),
     ])
-    with pytest.raises(task_graph.CycleError):
+    with pytest.raises(ll_dag.CycleError):
         g.add(edges=[('baz', 'foo')])
-    with pytest.raises(task_graph.CycleError):
+    with pytest.raises(ll_dag.CycleError):
         g.add(edges=[('bar', 'foo')])
 
 
@@ -116,7 +116,7 @@ def test_detect_not_cycle():
 
 def test_self_dep():
     g = StringGraph()
-    with pytest.raises(task_graph.CycleError, match="['foo', 'foo']"):
+    with pytest.raises(ll_dag.CycleError, match="['foo', 'foo']"):
         g.add(edges=[('foo', 'foo')])
 
 
@@ -126,7 +126,7 @@ def test_add_edge_on_finished_error():
     g.mark_finished('foo')
     g.add(nodes=['baz'])
     assert set(g.ready_nodes) == {'bar', 'baz'}
-    with pytest.raises(task_graph.GraphStateError, match='foo'):
+    with pytest.raises(ll_dag.GraphStateError, match='foo'):
         g.add(edges=[('baz', 'foo')])
 
 
@@ -134,19 +134,19 @@ def test_add_dup_edge_error():
     g = StringGraph(nodes=['foo', 'bar'])
     g.add(edges=[('foo', 'bar')])
     assert set(g.ready_nodes) == {'foo'}
-    with pytest.raises(task_graph.DuplicateEdgeError, match="from_='foo', to='bar'"):
+    with pytest.raises(ll_dag.DuplicateEdgeError, match="from_='foo', to='bar'"):
         g.add(edges=[('foo', 'bar')])
 
 
 def test_add_dup_node_error():
     g = StringGraph(nodes=['foo'])
-    with pytest.raises(task_graph.DuplicateNodeError, match='foo'):
+    with pytest.raises(ll_dag.DuplicateNodeError, match='foo'):
         g.add(nodes=['foo'])
 
 
 def test_missing_node_error():
     g = StringGraph(nodes=['foo', 'bar'])
-    with pytest.raises(task_graph.MissingNodeError, match='quux'):
+    with pytest.raises(ll_dag.MissingNodeError, match='quux'):
         g.add(edges=[('quux', 'bar')])
 
 
@@ -164,21 +164,21 @@ def test_random_large_graph():
         second = random.randrange(first + 1, len(items) - 1)
         try:
             g.add(edges=[(items[first], items[second])])
-        except task_graph.DuplicateEdgeError:
+        except ll_dag.DuplicateEdgeError:
             pass
 
 
 def test_restore():
     g = StringGraph()
     assert set(g.ready_nodes) == set()
-    with pytest.raises(task_graph.DuplicateNodeError):
+    with pytest.raises(ll_dag.DuplicateNodeError):
         g.add(nodes=['foo', 'bar', 'bar', 'baz'])
     assert set(g.ready_nodes) == set()
     assert list(g.all_nodes) == []
 
     g.add(nodes=['foo', 'bar', 'baz'], edges=[('foo', 'bar'), ('bar', 'baz')])
     assert set(g.ready_nodes) == {'foo'}
-    with pytest.raises(task_graph.CycleError):
+    with pytest.raises(ll_dag.CycleError):
         g.add(edges=[('baz', 'foo')])
     assert set(g.ready_nodes) == {'foo'}
 
@@ -202,5 +202,5 @@ def test_copy():
 
 
 def test_sameness():
-    import dagon.core.task_graph
-    assert dagon.core.task_graph.TaskGraph is task_graph.TaskGraph  # type: ignore
+    import dagon.core.ll_dag
+    assert dagon.core.ll_dag.LowLevelDAG is ll_dag.LowLevelDAG  # type: ignore

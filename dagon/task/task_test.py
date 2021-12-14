@@ -3,8 +3,8 @@ import itertools
 import dagon.task as mod
 from dagon.util.testing import async_test
 
-from .dag import TaskDAG, result_from
-from ..core.result import TaskResult, TaskSuccess
+from .dag import TaskDAG, result_of
+from ..core.result import NodeResult, Success
 
 # pyright: reportUnusedFunction=false
 
@@ -31,12 +31,12 @@ async def test_add_and_run() -> None:
 
     @mod.define_in(dag, depends=[string])
     async def print_string() -> None:
-        await result_from(string)
+        await result_of(string)
 
     @mod.define_in(dag, depends=[string])
     async def print_string2() -> None:
-        await result_from(string)
-        await result_from(string)
+        await result_of(string)
+        await result_of(string)
 
     @mod.define_in(dag, depends=[print_string, print_string2])
     async def final_tgt() -> None:
@@ -44,22 +44,22 @@ async def test_add_and_run() -> None:
 
     results = await dag.execute(['print-string'])
     assert results == {
-        TaskResult(string, TaskSuccess('hello')),
-        TaskResult(print_string, TaskSuccess(None)),
+        NodeResult(string, Success('hello')),
+        NodeResult(print_string, Success(None)),
     }
 
     results = await dag.execute(['print-string2'])
     assert results == {
-        TaskResult(string, TaskSuccess('hello')),
-        TaskResult(print_string2, TaskSuccess(None)),
+        NodeResult(string, Success('hello')),
+        NodeResult(print_string2, Success(None)),
     }
 
     results = await dag.execute(['final-tgt'])
     assert results == {
-        TaskResult(string, TaskSuccess('hello')),
-        TaskResult(print_string, TaskSuccess(None)),
-        TaskResult(print_string2, TaskSuccess(None)),
-        TaskResult(final_tgt, TaskSuccess(None)),
+        NodeResult(string, Success('hello')),
+        NodeResult(print_string, Success(None)),
+        NodeResult(print_string2, Success(None)),
+        NodeResult(final_tgt, Success(None)),
     }
 
 
@@ -88,11 +88,11 @@ async def _run_oo_test(use_oo_deps: bool) -> None:
 
     if use_oo_deps:
         assert result == {
-            TaskResult(_first, TaskSuccess(None)),
-            TaskResult(_second, TaskSuccess(None)),
+            NodeResult(_first, Success(None)),
+            NodeResult(_second, Success(None)),
         }
     else:
-        assert result == {TaskResult(_second, TaskSuccess(None))}
+        assert result == {NodeResult(_second, Success(None))}
 
 
 @async_test

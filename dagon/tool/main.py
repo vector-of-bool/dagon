@@ -16,10 +16,13 @@ from pathlib import Path
 from typing import Iterable, NoReturn, Optional, Sequence, cast
 
 import pkg_resources
-from typing_extensions import Protocol
-
+from dagon.core.result import Cancellation, Failure
+from dagon.event.event import EventsPlugin
+from dagon.plugin import PluginAwareExecutor, PluginSet
+from dagon.plugin.output import PrintCollector
 from dagon.task.dag import TaskDAG, populate_dag_context
-from dagon.core.result import TaskCancellation, TaskFailure, TaskSuccess
+from dagon.task.task import DisabledTaskError, InvalidTask
+from typing_extensions import Protocol
 
 _g_loading_dag = False
 
@@ -86,7 +89,7 @@ def get_argparser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_failure(task_name: str, fail: TaskFailure) -> None:
+def _print_failure(task_name: str, fail: Failure) -> None:
     if isinstance(fail.exception, asyncio.CancelledError):
         # Don't print exceptions which are just task cancellations
         return
@@ -117,19 +120,40 @@ def run_with_args(dag: TaskDAG, args: ArgParseResult, default_tasks: Optional[Se
     if not tasks:
         warnings.warn('No tasks are set to be executed')
 
-    results = asyncio.run(dag.execute(tasks))
+    try:
+        ll_dag = dag.low_level_graph(tasks)
+    except DisabledTaskError as e:
+        print(f'Unable to create the execution plan: {e}', file=sys.stderr)
+        return 1
+    except InvalidTask as e:
+        if e.candidate:
+            print(f'No such task "{e.key}". Did you mean "{e.candidate.name}" ?', file=sys.stderr)
+        else:
+            print(f'No such task "{e.key}".', file=sys.stderr)
+        return 1
+
+    printer = PrintCollector()
+    printer.on_print.connect(sys.__stdout__.write)
+
+    plugins = PluginSet()
+    plugins.load(EventsPlugin())
+    plugins.load(printer)
+    exe = PluginAwareExecutor(plugins, ll_dag)
+
+    results = exe.run_all_until_complete()
+    failed = False
     for item in results:
-        if isinstance(item.result, TaskFailure):
+        if isinstance(item.result, Failure):
             _print_failure(item.task.name, item.result)
-        elif isinstance(item.result, TaskCancellation):
+            failed = True
+        elif isinstance(item.result, Cancellation):
             print(f'Task "{item.task.name}" was cancelled')
+            failed = True
         else:
             # Nothing to print for successes
             pass
 
-    if any((not isinstance(r.result, TaskSuccess)) for r in results):
-        return 1
-    return 0
+    return 1 if failed else 0
 
 
 def run_for_dag(dag: TaskDAG,

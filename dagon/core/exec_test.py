@@ -5,10 +5,10 @@ from asyncio import Event
 from typing import Iterable
 
 import pytest
-from dagon.core.result import TaskResult, TaskSuccess
+from dagon.core.result import NodeResult, Success
 
-from . import exec, task_graph
-from .task_graph import TaskGraph, TaskState
+from . import exec, ll_dag
+from .ll_dag import LowLevelDAG, NodeState
 
 
 class CalcLengths:
@@ -26,19 +26,19 @@ class CalcLengths:
 def test_calc_lengths():
     asyncio.set_event_loop(asyncio.new_event_loop())
     calc = CalcLengths()
-    graph = task_graph.TaskGraph(nodes=['foo', 'bar', 'baz'], edges=[('bar', 'baz'), ('foo', 'baz')])
+    graph = ll_dag.LowLevelDAG(nodes=['foo', 'bar', 'baz'], edges=[('bar', 'baz'), ('foo', 'baz')])
     exe = exec.SimpleExecutor(graph.copy(), calc.save_length)
     res = exe.run_some_until_complete()
     assert exe.has_pending_work
     assert not exe.has_running_work
     assert res == {
-        TaskResult('foo', TaskSuccess('foo')),
-        TaskResult('bar', TaskSuccess('bar')),
+        NodeResult('foo', Success('foo')),
+        NodeResult('bar', Success('bar')),
     }
     assert calc.strings['foo'] == 3
     assert calc.strings['bar'] == 3
     res = exe.run_some_until_complete()
-    assert res == {TaskResult('baz', TaskSuccess('baz'))}
+    assert res == {NodeResult('baz', Success('baz'))}
     assert not exe.has_pending_work
     assert not exe.has_running_work
     assert not exe.any_failed
@@ -54,8 +54,7 @@ def test_calc_lengths():
     assert 'foo' not in calc.strings
     assert calc.strings['bar'] == 3
     assert exe.any_failed
-    assert exe.run_some_until_complete() == set()
-    assert exe.run_all_until_complete() == set()
+    assert exe.finished
 
 
 class EventWaiter:
@@ -72,15 +71,15 @@ class EventWaiter:
 @pytest.mark.asyncio
 async def test_exec():
     lens = CalcLengths()
-    graph = TaskGraph[str](nodes=['foo', 'bar', 'baz'], edges=[('foo', 'bar'), ('bar', 'baz')])
+    graph = LowLevelDAG[str](nodes=['foo', 'bar', 'baz'], edges=[('foo', 'bar'), ('bar', 'baz')])
     exe = exec.SimpleExecutor(graph, lens.save_length)
     assert exe.has_pending_work
-    assert graph.state_of('foo') == TaskState.Pending
-    assert graph.state_of('bar') == TaskState.Pending
-    assert graph.state_of('baz') == TaskState.Pending
+    assert graph.state_of('foo') == NodeState.Pending
+    assert graph.state_of('bar') == NodeState.Pending
+    assert graph.state_of('baz') == NodeState.Pending
     await exe.run_some()
-    assert graph.state_of('foo') == TaskState.Finished
-    assert graph.state_of('bar') == TaskState.Pending
+    assert graph.state_of('foo') == NodeState.Finished
+    assert graph.state_of('bar') == NodeState.Pending
     assert 'bar' in graph.ready_nodes
     assert exe.has_pending_work
 
@@ -88,34 +87,34 @@ async def test_exec():
 @pytest.mark.asyncio
 async def test_exec_interrupt():
     waiter = EventWaiter(['foo', 'bar', 'baz'])
-    graph = TaskGraph[str](nodes=['foo', 'bar', 'baz'], edges=[('foo', 'bar'), ('foo', 'baz')])
+    graph = LowLevelDAG[str](nodes=['foo', 'bar', 'baz'], edges=[('foo', 'bar'), ('foo', 'baz')])
     interruptor = Event()
     exe = exec.SimpleExecutor(graph, waiter.wait_for)
     assert exe.has_pending_work
 
-    assert graph.state_of('foo') == TaskState.Pending
+    assert graph.state_of('foo') == NodeState.Pending
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(exe.run_some(interrupt=interruptor), 0.1)
+        await asyncio.wait_for(exe.run_some(interrupt=interruptor), 0.01)
 
-    assert graph.state_of('foo') == TaskState.Running
+    assert graph.state_of('foo') == NodeState.Running
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(exe.run_some(interrupt=interruptor), 0.1)
+        await asyncio.wait_for(exe.run_some(interrupt=interruptor), 0.01)
 
     interruptor.set()
     await asyncio.wait_for(exe.run_some(interrupt=interruptor), 1)
-    assert graph.state_of('foo') == TaskState.Running
+    assert graph.state_of('foo') == NodeState.Running
 
     interruptor.clear()
 
     # Trigger the 'foo' task to return
     waiter.events['foo'].set()
     res = await asyncio.wait_for(exe.run_some(interrupt=interruptor), 1)
-    assert graph.state_of('foo') == TaskState.Finished
-    assert res == {TaskResult('foo', TaskSuccess('foo'))}
+    assert graph.state_of('foo') == NodeState.Finished
+    assert res == {NodeResult('foo', Success('foo'))}
     assert exe.has_pending_work
     assert not exe.has_running_work
-    assert graph.state_of('bar') == TaskState.Pending
-    assert graph.state_of('baz') == TaskState.Pending
+    assert graph.state_of('bar') == NodeState.Pending
+    assert graph.state_of('baz') == NodeState.Pending
 
     assert 'bar' in graph.ready_nodes
     waiter.events['bar'].set()
@@ -124,6 +123,6 @@ async def test_exec_interrupt():
     assert not exe.has_pending_work
     assert not exe.has_running_work
     assert res == {
-        TaskResult('bar', TaskSuccess('bar')),
-        TaskResult('baz', TaskSuccess('baz')),
+        NodeResult('bar', Success('bar')),
+        NodeResult('baz', Success('baz')),
     }

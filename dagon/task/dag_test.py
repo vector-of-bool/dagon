@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from . import dag as dag_mod
-from dagon.core.result import TaskResult, TaskSuccess
+from dagon.core.result import NodeResult, Success
 from .task import Dependency, Task
 
 
@@ -33,8 +33,8 @@ def test_simple() -> None:
     results = dag.execute(['bar'])
     results = asyncio.run(results)
     assert results == {
-        TaskResult(t1, TaskSuccess(None)),
-        TaskResult(t2, TaskSuccess(None)),
+        NodeResult(t1, Success(None)),
+        NodeResult(t2, Success(None)),
     }
     assert ran == 2
 
@@ -44,7 +44,7 @@ def test_simple_with_result():
         return 2
 
     async def twice_prior() -> int:
-        val: int | None = await dag_mod.result_from('foo')
+        val: int | None = await dag_mod.result_of('foo')
         print(val)
         assert val == 2
         return 2 * val
@@ -56,6 +56,6 @@ def test_simple_with_result():
     dag.add_task(t2)
     results = asyncio.run(dag.execute(['bar']))
     assert results == {
-        TaskResult(t1, TaskSuccess(2)),
-        TaskResult(t2, TaskSuccess(4)),
+        NodeResult(t1, Success(2)),
+        NodeResult(t2, Success(4)),
     }

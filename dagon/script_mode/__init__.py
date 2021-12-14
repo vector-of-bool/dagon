@@ -34,7 +34,7 @@ from dagon.tool import main
 try:
     dag.current_dag()
 except RuntimeError:
-    dag.set_current_dag(dag.TaskDAG('script-mode'))
+    dag.set_current_dag(dag.TaskDAG('<script-mode>'))
 
 
 def run(argv: Sequence[str] | None = None, *, default_tasks: Sequence[str] | None = None) -> NoReturn:

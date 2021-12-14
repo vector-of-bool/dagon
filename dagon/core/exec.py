@@ -1,5 +1,5 @@
 """
-Low-level task graph execution APIs.
+Low-level graph execution APIs.
 """
 
 from __future__ import annotations
@@ -10,67 +10,58 @@ from typing import Any, Awaitable, Callable, Generic, cast
 
 from dagon.util import Opaque
 
-from .result import (ExceptionInfo, TaskCancellation, TaskFailure, TaskResult, TaskSuccess)
-from .task_graph import TaskGraph, TaskT
+from .ll_dag import LowLevelDAG, NodeT
+from .result import Cancellation, ExceptionInfo, Failure, NodeResult, Success
 
-
-class TaskExceptionWarning(Warning):
-    pass
-
-
-TaskExecutorFunction = Callable[[TaskT], 'Awaitable[Any] | Any']
+NodeExecutorFunction = Callable[[NodeT], 'Awaitable[Any] | Any']
 """
-Function type used to execute tasks. Must return a TaskExecResult or an awaitable thereof.
-
-If the function returns ``TaskExecResult.Okay``, task execution will continue. If it
-returns ``TaskExecResult.Stop``, task execution will stop enqueing tasks and wait for all
-running tasks to finish.
+Function type used to "execute" a node.
 """
 
 
-class SimpleExecutor(Generic[TaskT]):
+class SimpleExecutor(Generic[NodeT]):
     """
-    A class that organizes and manages the execution of a task graph.
+    A class that organizes and manages the execution of a :class:`LowLevelDAG`.
 
-    This class creates asyncio.Task objects for tasks in the graph and enqueues
-    them when ready.
+    This class creates :class:`asyncio.Task` objects for tasks in the graph and
+    enqueues them when ready.
 
-    :param graph: The graph of tasks that will be executed.
-    :param exec_fn: A function that is invoked to execute task objects
-    :param start_predicate: A predicate function that tells the executor whether it should enqueue a given task.
-        By default, this always returns True. This can be used to implement parallelism limits, for example.
+    :param graph: The graph of nodes that will be executed.
+    :param exec_fn: A function that is invoked to execute node objects
 
     .. note::
         The :var:`graph` object will be modified by this executor's work!
     """
     def __init__(self,
-                 graph: TaskGraph[TaskT],
-                 exec_fn: TaskExecutorFunction[TaskT],
+                 graph: LowLevelDAG[NodeT],
+                 exec_fn: NodeExecutorFunction[NodeT],
                  *,
                  loop: asyncio.AbstractEventLoop | None = None) -> None:
         loop = loop or asyncio.get_event_loop()
-        #: Our task graph
+        #: Our graph
         self._graph = graph
-        #: The task-executing function
-        self._exec_fn = cast(Callable[[TaskT], 'Opaque | Awaitable[Opaque]'], exec_fn)
-        #: The set of asyncio.Task tasks that map to currently running tasks
-        self._running: set[asyncio.Task[TaskResult[TaskT]]] = set()
-        #: The result map for the tasks
-        self._futures: dict[TaskT, 'asyncio.Future[TaskResult[TaskT]]'] = {
+        #: The node-executing function
+        self._exec_fn = cast(Callable[[NodeT], 'Opaque | Awaitable[Opaque]'], exec_fn)
+        #: The set of :class:`asyncio.Task` tasks that map to currently running nodes
+        self._running: set[asyncio.Task[NodeResult[NodeT]]] = set()
+        #: The result map for all nodes
+        self._futures: dict[NodeT, 'asyncio.Future[NodeResult[NodeT]]'] = {
             t: asyncio.Future(loop=loop)
             for t in graph.all_nodes
         }
         self._loop = loop
         self._any_failed = False
+        self._started = False
+        self._finished = False
 
     @property
     def has_pending_work(self):
-        """Whether the executor has running or pending tasks remaining"""
+        """Whether the executor has running or pending work remaining"""
         return self._graph.has_ready_nodes or bool(self._running)
 
     @property
     def has_running_work(self):
-        """Whether there are any running tasks"""
+        """Whether there is currently any running work"""
         return bool(self._running)
 
     @property
@@ -80,11 +71,22 @@ class SimpleExecutor(Generic[TaskT]):
 
     @property
     def any_failed(self) -> bool:
-        """Whether any of the tasks in the graph have experienced failure/cancellation"""
+        """Whether any of the nodes in the graph have experienced failure/cancellation"""
         return self._any_failed
 
-    def result_of(self, t: TaskT) -> Awaitable[TaskResult[TaskT]]:
-        """Obtain the awaitable on the result of the given task"""
+    @property
+    def finished(self):
+        """Whether the execution is finished and no more work will be queued"""
+        return self._finished
+
+    def on_start(self) -> None:
+        pass
+
+    def on_finish(self) -> None:
+        pass
+
+    def result_of(self, t: NodeT) -> Awaitable[NodeResult[NodeT]]:
+        """Obtain the awaitable on the result of the given node"""
         return self._futures[t]
 
     def _start_more(self) -> None:
@@ -92,7 +94,7 @@ class SimpleExecutor(Generic[TaskT]):
         Enqueue all ready tasks in the associate task graph.
         """
         nodes_to_start = [n for n in self._graph.ready_nodes]
-        new_tasks = set(self.loop.create_task(self._run_task_and_record(n)) for n in nodes_to_start)
+        new_tasks = set(self.loop.create_task(self.do_run_node_outer(n)) for n in nodes_to_start)
         for n in nodes_to_start:
             self._graph.mark_running(n)
         self._running |= new_tasks
@@ -100,12 +102,17 @@ class SimpleExecutor(Generic[TaskT]):
     async def run_some(self,
                        *,
                        interrupt: asyncio.Event | None = None,
-                       timeout: float | None = None) -> set[TaskResult[TaskT]]:
+                       timeout: float | None = None) -> set[NodeResult[NodeT]]:
         """
         Wait for any tasks to finish, or the 'interrupt' event is signaled.
 
         One must call :method:`.start_more` **before** this method.
         """
+        assert not self.finished, 'run_some() called on finished executor'
+        if not self._started and self.has_pending_work:
+            self.on_start()
+            self._started = True
+
         if not self._any_failed:
             # There are no failures. Keep adding work
             self._start_more()
@@ -131,7 +138,7 @@ class SimpleExecutor(Generic[TaskT]):
             # This occurs if we were signaled to return or if we hit our timeout
             return set()
 
-        ret: set[TaskResult[TaskT]] = set()
+        ret: set[NodeResult[NodeT]] = set()
         done, self._running = await tasks_fut
         for t in done:
             res = await t
@@ -139,45 +146,57 @@ class SimpleExecutor(Generic[TaskT]):
             ret.add(res)
 
         if not self._any_failed:
-            # Check if any of the task executions represents a failure
-            self._any_failed = any((not isinstance(r.result, TaskSuccess)) for r in ret)
+            # Check if any of the executions represents a failure
+            self._any_failed = any((not isinstance(r.result, Success)) for r in ret)
+
+        if not self.has_pending_work or (self._any_failed and not self.has_running_work):
+            self._finished = True
+            self.on_finish()
 
         return ret
 
-    async def run_all(self, *, interrupt: asyncio.Event | None = None) -> set[TaskResult[TaskT]]:
+    async def run_all(self, *, interrupt: asyncio.Event | None = None) -> set[NodeResult[NodeT]]:
         """
-        Execute all tasks in the task graph until completion, or until the 'interrupt' event is signaled.
+        Execute all nodes in the DAG until completion, or until the 'interrupt' event is signaled.
         """
-        ret: set[TaskResult[TaskT]] = set()
+        ret: set[NodeResult[NodeT]] = set()
         while (not self._any_failed and self.has_pending_work) or self.has_running_work:
             ret |= await self.run_some(interrupt=interrupt)
         return ret
 
-    async def _run_task_and_record(self, task_: TaskT) -> TaskResult[TaskT]:
-        # Run the task in a way that captures all exceptions
-        resdat = await self._run_task_noraise(task_)
-        self._futures[task_].set_result(resdat)
+    async def do_run_node_outer(self, node: NodeT) -> NodeResult[NodeT]:
+        return await self._run_and_record(node)
+
+    async def _run_and_record(self, node: NodeT) -> NodeResult[NodeT]:
+        # Run the task and capture all results
+        resdat = await self._run_noraise(node)
+        self._futures[node].set_result(resdat)
         return resdat
 
-    async def _run_task_noraise(self, task_: TaskT) -> TaskResult[TaskT]:
+    async def _run_noraise(self, node: NodeT) -> NodeResult[NodeT]:
+        # Run the task in a way that captures all exceptions
         try:
-            retval = self._exec_fn(task_)
+            retval = await self.do_run_node_inner(node)
             # A successful execution with no errors. Capture the return value:
-            if isinstance(retval, Awaitable):
-                retval = await retval
-            return TaskResult(task_, TaskSuccess(retval))
+            return NodeResult(node, Success(retval))
         except asyncio.CancelledError:
             # Cancellation
-            return TaskResult(task_, TaskCancellation())
+            return NodeResult(node, Cancellation())
         except:  # pylint: disable=bare-except
             # An exception came from the task
             exc_info = sys.exc_info()
             assert exc_info[0]
             exc_info = cast(ExceptionInfo, exc_info)
-            return TaskResult(task_, TaskFailure(exc_info))
+            return NodeResult(node, Failure(exc_info))
 
-    def run_all_until_complete(self) -> set[TaskResult[TaskT]]:
+    async def do_run_node_inner(self, node: NodeT) -> Any:
+        ret = self._exec_fn(node)
+        if isinstance(ret, Awaitable):
+            ret = await ret
+        return ret
+
+    def run_all_until_complete(self) -> set[NodeResult[NodeT]]:
         return self.loop.run_until_complete(self.run_all())
 
-    def run_some_until_complete(self) -> set[TaskResult[TaskT]]:
+    def run_some_until_complete(self) -> set[NodeResult[NodeT]]:
         return self.loop.run_until_complete(self.run_some())

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Type
 
-from .dag import TaskDAG, current_dag, result_from
+from .dag import TaskDAG, current_dag, result_of
 from .task import Dependency, Task, TaskFunction
 from dagon.util import T, kebab_name
 
@@ -18,7 +18,7 @@ __all__ = [
     'Dependency',
     'DependsArg',
     'TaskFunction',
-    'result_from',
+    'result_of',
 ]
 
 

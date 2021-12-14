@@ -1,5 +1,5 @@
 """
-Provides a low-level generic task graph implementation.
+Provides a low-level generic task-aware DAG implementation.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, Dict, Generic, Hashable, Iterable, Sequence, TypeVar
 
 from typing_extensions import TypeAlias
 
-TaskT = TypeVar('TaskT', bound=Hashable)
+NodeT = TypeVar('NodeT', bound=Hashable)
 """
 A type parameter for directed graph nodes. Each node must be hashable.
 """
@@ -28,8 +28,8 @@ class GraphStateError(RuntimeError):
 
 
 @dataclass
-class CycleError(GraphError, Generic[TaskT]):
-    hint: Sequence[TaskT]
+class CycleError(GraphError, Generic[NodeT]):
+    hint: Sequence[NodeT]
 
 
 @dataclass()
@@ -47,74 +47,74 @@ class MissingNodeError(GraphError):
     node: Any
 
 
-class TaskState(enum.Enum):
+class NodeState(enum.Enum):
     Pending = 0
     Running = 1
     Finished = 2
 
 
 @dataclass()
-class _GraphNode(Generic[TaskT]):
+class _GraphNodeMeta(Generic[NodeT]):
     """
     A node in the graph, containing an associated value.
     """
     #: The object associated with this node
-    value: TaskT
+    value: NodeT
     #: The number of pending inputs to this node in the current execution
     pending_inputs: int = 0
     #: The order/"depth" of the node in the graph
     order: int = 0
     #: The current state of the graph
-    state: TaskState = TaskState.Pending
+    state: NodeState = NodeState.Pending
     #: The objects that depends on this node in the graph
-    outs: set[TaskT] = field(default_factory=set)
+    outs: set[NodeT] = field(default_factory=set)
     #: The objects upon which this node depends
-    ins: set[TaskT] = field(default_factory=set)
+    ins: set[NodeT] = field(default_factory=set)
 
-    def __deepcopy__(self, memo: Any) -> _GraphNode[TaskT]:
-        return _GraphNode(self.value, self.pending_inputs, self.order, self.state, set(self.outs), set(self.ins))
+    def __deepcopy__(self, memo: Any) -> _GraphNodeMeta[NodeT]:
+        return _GraphNodeMeta(self.value, self.pending_inputs, self.order, self.state, set(self.outs), set(self.ins))
 
     @property
     def is_ready(self) -> bool:
         """Determine whether this node is ready to run"""
-        return self.state is TaskState.Pending and self.pending_inputs == 0
+        return self.state is NodeState.Pending and self.pending_inputs == 0
 
 
 @dataclass(frozen=True)
-class Edge(Generic[TaskT]):
+class Edge(Generic[NodeT]):
     """
     A edge in the graph representing a dependency of one node value on another
     """
-    from_: TaskT
-    to: TaskT
+    from_: NodeT
+    to: NodeT
 
 
-_NodeMap: TypeAlias = Dict[TaskT, _GraphNode[TaskT]]
+_NodeMap: TypeAlias = Dict[NodeT, _GraphNodeMeta[NodeT]]
 """A map of node values to the metadata for that node"""
 
 
-class TaskGraph(Generic[TaskT]):
+class LowLevelDAG(Generic[NodeT]):
     """
-    A generic directed acyclic task-graph. It is a "task" graph because a node
-    can be marked "finished", and one can query the graph for the nodes that do
-    not have any un-finished inputs (Meaning the task is "ready").
+    A generic directed acyclic task-aware-graph. It is a task-aware-graph
+    because a node can be marked "finished", and one can query the graph for the
+    nodes that do not have any un-finished inputs (Meaning the node is "ready").
 
     :param nodes: The initial nodes of the graph.
     :param edges: The initial edges of the graph.
 
     .. seealso:: :func:`.add`
     """
-    def __init__(self, *, nodes: Iterable[TaskT] = (), edges: Iterable[Edge[TaskT] | tuple[TaskT, TaskT]] = ()) -> None:
+    def __init__(self, *, nodes: Iterable[NodeT] = (), edges: Iterable[Edge[NodeT] | tuple[NodeT, NodeT]] = ()) -> None:
         #: All nodes in the graph
-        self._nodes: _NodeMap[TaskT] = {}
+        self._nodes: _NodeMap[NodeT] = {}
         #: The set of nodes that are ready to be processed
-        self._ready_nodes: set[TaskT] = set()
+        self._ready_nodes: set[NodeT] = set()
         #: all of the edges in the graph
-        self._edges: set[Edge[TaskT]] = set()
+        self._edges: set[Edge[NodeT]] = set()
         # Begin by loading up all the initial nodes and edges
         self.add(nodes=nodes, edges=edges)
 
-    def add(self, *, nodes: Iterable[TaskT] = (), edges: Iterable[Edge[TaskT] | tuple[TaskT, TaskT]] = ()) -> None:
+    def add(self, *, nodes: Iterable[NodeT] = (), edges: Iterable[Edge[NodeT] | tuple[NodeT, NodeT]] = ()) -> None:
         """
         Add content to the graph.
 
@@ -124,14 +124,14 @@ class TaskGraph(Generic[TaskT]):
         # Duplicate the nodes so that we can modify them in-place. Exceptions will leave the
         # graph unchanged.
         ready_nodes = set(self._ready_nodes)
-        repl: _NodeMap[TaskT] = {}
-        more_edges: set[Edge[TaskT]] = set()
+        repl: _NodeMap[NodeT] = {}
+        more_edges: set[Edge[NodeT]] = set()
 
         # First add all the nodes
         for n in nodes:
             if n in self._nodes or n in repl:
                 raise DuplicateNodeError(n)
-            repl[n] = _GraphNode(n)
+            repl[n] = _GraphNodeMeta(n)
             ready_nodes.add(n)
 
         # Now add all the edges
@@ -146,10 +146,10 @@ class TaskGraph(Generic[TaskT]):
         self._edges |= more_edges
         self._ready_nodes = ready_nodes
 
-    def copy(self) -> TaskGraph[TaskT]:
+    def copy(self) -> LowLevelDAG[NodeT]:
         return copy.deepcopy(self)
 
-    def mark_running(self, node: TaskT) -> None:
+    def mark_running(self, node: NodeT) -> None:
         """
         Mark a node as "running"
         """
@@ -158,24 +158,24 @@ class TaskGraph(Generic[TaskT]):
         assert gnode.pending_inputs == 0, ('mark_running() a node that still has pending inputs', gnode)
         assert gnode.value in self._ready_nodes
         self._ready_nodes.remove(gnode.value)
-        gnode.state = TaskState.Running
+        gnode.state = NodeState.Running
 
-    def mark_finished(self, node: TaskT) -> None:
+    def mark_finished(self, node: NodeT) -> None:
         """
         Mark a node as "finished." This will update the ready-nodes of this graph.
         """
         gnode = self._nodes.get(node)
         assert gnode is not None, ('mark_finished() a node which is not in the graph', node)
         assert gnode.pending_inputs == 0, ('mark_finished() a node that still has pending inputs', gnode)
-        assert gnode.state is not TaskState.Finished, ('mark_finished() a node that was already marked as finished',
+        assert gnode.state is not NodeState.Finished, ('mark_finished() a node that was already marked as finished',
                                                        gnode)
-        if gnode.state is TaskState.Pending:
+        if gnode.state is NodeState.Pending:
             #: A node can be marked as finished if it was pending but not running, just skip that state
             self._ready_nodes.remove(gnode.value)
-        gnode.state = TaskState.Finished
+        gnode.state = NodeState.Finished
         for out in gnode.outs:
             out_node = self._nodes.get(out)
-            assert out_node is not None, 'Malformed task graph'
+            assert out_node is not None, 'Malformed DAG'
             assert node in out_node.ins
             assert out_node.pending_inputs > 0
             out_node.pending_inputs -= 1
@@ -184,17 +184,17 @@ class TaskGraph(Generic[TaskT]):
                 self._ready_nodes.add(out_node.value)
 
     @property
-    def ready_nodes(self) -> Iterable[TaskT]:
+    def ready_nodes(self) -> Iterable[NodeT]:
         """The node values in the graph that have no unfinished inputs"""
         return iter(self._ready_nodes)
 
     @property
-    def all_nodes(self) -> Iterable[TaskT]:
-        """All nodes currently in the task graph"""
+    def all_nodes(self) -> Iterable[NodeT]:
+        """All nodes currently in the graph"""
         return self._nodes.keys()
 
     @property
-    def all_edges(self) -> Iterable[Edge[TaskT]]:
+    def all_edges(self) -> Iterable[Edge[NodeT]]:
         """Iterate all the edges in the graph"""
         return iter(self._edges)
 
@@ -202,16 +202,16 @@ class TaskGraph(Generic[TaskT]):
     def has_ready_nodes(self) -> bool:
         return bool(self._ready_nodes)
 
-    def dependencies_of(self, node: TaskT) -> Iterable[TaskT]:
+    def dependencies_of(self, node: NodeT) -> Iterable[NodeT]:
         return iter(self._nodes[node].ins)
 
-    def dependents_of(self, node: TaskT) -> Iterable[TaskT]:
+    def dependents_of(self, node: NodeT) -> Iterable[NodeT]:
         return iter(self._nodes[node].outs)
 
-    def state_of(self, node: TaskT) -> TaskState:
+    def state_of(self, node: NodeT) -> NodeState:
         return self._nodes[node].state
 
-    def _add_edge(self, edge: Edge[TaskT], ready_nodes: set[TaskT], repl: _NodeMap[TaskT]) -> None:
+    def _add_edge(self, edge: Edge[NodeT], ready_nodes: set[NodeT], repl: _NodeMap[NodeT]) -> None:
         """
         Introduce a new edge to the graph. This requires that all output nodes be pending.
 
@@ -231,7 +231,7 @@ class TaskGraph(Generic[TaskT]):
             # to-node doesn't exist
             raise MissingNodeError(edge.to)
 
-        if to_node.state is not TaskState.Pending:
+        if to_node.state is not NodeState.Pending:
             # to-node has already been marked finished/running, so the dependency is broken
             raise GraphStateError(to_node.value)
 
@@ -256,13 +256,13 @@ class TaskGraph(Generic[TaskT]):
 
         # If the from-node is not already marked as "finished", then the to-node
         # has an additional pending input
-        if from_node.state is not TaskState.Finished:
+        if from_node.state is not NodeState.Finished:
             to_node.pending_inputs += 1
             if to_node.pending_inputs == 1:
                 # We made the node un-ready
                 ready_nodes.remove(to_node.value)
 
-    def _get_node(self, repl: _NodeMap[TaskT], k: TaskT) -> _GraphNode[TaskT]:
+    def _get_node(self, repl: _NodeMap[NodeT], k: NodeT) -> _GraphNodeMeta[NodeT]:
         n = repl.get(k)
         if n:
             return n
@@ -270,16 +270,16 @@ class TaskGraph(Generic[TaskT]):
         assert n
         return n
 
-    def _propagate_order(self, repl: _NodeMap[TaskT], node: _GraphNode[TaskT], visited: set[TaskT],
-                         stack: list[TaskT]) -> None:
+    def _propagate_order(self, repl: _NodeMap[NodeT], node: _GraphNodeMeta[NodeT], visited: set[NodeT],
+                         stack: list[NodeT]) -> None:
         pending = (n for n in node.ins if n not in visited)
         for inp in pending:
             visited.add(inp)
             from_node = self._get_node(repl, inp)
             self._recalc_order(repl, from_node, visited, stack)
 
-    def _recalc_order(self, repl: _NodeMap[TaskT], node: _GraphNode[TaskT], visited: set[TaskT],
-                      stack: list[TaskT]) -> None:
+    def _recalc_order(self, repl: _NodeMap[NodeT], node: _GraphNodeMeta[NodeT], visited: set[NodeT],
+                      stack: list[NodeT]) -> None:
         if node.value == stack[0]:
             raise CycleError(stack)
         out_max = max(self._get_node(repl, n).order for n in node.outs)
@@ -292,32 +292,34 @@ class TaskGraph(Generic[TaskT]):
             self._propagate_order(repl, node, visited, stack)
             stack.pop()
 
-    def __contains__(self, value: TaskT) -> bool:
+    def __contains__(self, value: NodeT) -> bool:
         "Check whether the named value is already a node in the graph"
         return value in self._nodes
 
 
-class TaskGraphView(Generic[TaskT]):
+class DAGView(Generic[NodeT]):
     """
-    Obtain a readonly view of a task graph.
+    Obtain a readonly view of a DAG graph.
 
     :param graph: The graph to view
     """
-    def __init__(self, graph: TaskGraph[TaskT]) -> None:
+    def __init__(self, graph: LowLevelDAG[NodeT]) -> None:
         self._graph = graph
 
-    def dependencies_of(self, node: TaskT) -> Iterable[TaskT]:
+    def dependencies_of(self, node: NodeT) -> Iterable[NodeT]:
         "Get the dependencies of the given node"
         return self._graph.dependencies_of(node)
 
-    def dependents_of(self, node: TaskT) -> Iterable[TaskT]:
+    def dependents_of(self, node: NodeT) -> Iterable[NodeT]:
         "Get the dependents of the given node"
         return self._graph.dependents_of(node)
 
-    def nodes(self) -> Iterable[TaskT]:
+    @property
+    def nodes(self) -> Iterable[NodeT]:
         "Iterate all the nodes in the graph"
         return self._graph.all_nodes
 
-    def edges(self) -> Iterable[Edge[TaskT]]:
+    @property
+    def edges(self) -> Iterable[Edge[NodeT]]:
         "Iterate all the edges in the graph"
         return self._graph.all_edges

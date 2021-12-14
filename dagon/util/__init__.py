@@ -1,10 +1,26 @@
 from __future__ import annotations
+from contextlib import ExitStack
+import contextvars
 
-from typing import Generic, TypeVar
+from typing import Any, Callable, ContextManager, Generic, Iterable, TypeVar, cast
 from typing_extensions import Protocol
 
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
+
+
+def first(items: Iterable[T]) -> T:
+    """
+    Return the first element from an iterable object.
+    """
+    for n in items:
+        return n
+    raise ValueError(f'No first item in an empty iterable ({items!r})')
+
+
+def unused(*args: Any) -> None:
+    """Does nothing. Used to mark the given arguments as unused."""
+    args  # pylint: disable=pointless-statement
 
 
 class NoneSuch(Generic[T]):
@@ -65,3 +81,14 @@ def kebab_name(name: str) -> str:
           - ``foo.bar-baz``
     """
     return name.replace('__', '.').strip('_').replace('_', '-')
+
+
+def on_context_exit(cb: Callable[[], None]) -> ContextManager[None]:
+    st = ExitStack()
+    st.callback(cb)
+    return cast(ContextManager[None], st)
+
+
+def scope_set_contextvar(cvar: contextvars.ContextVar[T], value: T) -> ContextManager[None]:
+    tok = cvar.set(value)
+    return on_context_exit(lambda: cvar.reset(tok))

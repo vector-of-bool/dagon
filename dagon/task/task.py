@@ -95,3 +95,21 @@ class InvalidTask(RuntimeError):
         super().__init__(f'Unknown task name "{n.key}"')
         self.key = n.key
         self.candidate = n.candidate
+
+
+class DisabledTaskError(RuntimeError):
+    """Exception thrown when an attempt is made to execute a disabled task"""
+    def __init__(self, stack: Sequence[str], reason: str) -> None:
+        self._task_stack = list(stack)
+        root_task = stack[0]
+        disabled = stack[-1]
+        reqs_str = ''.join(f', which requires "{t}"' for t in stack[1:])
+
+        super().__init__(f'Cannot mark "{root_task}"{reqs_str}, because "{disabled}" is disabled: {reason}')
+
+    @property
+    def task_stack(self) -> Sequence[str]:
+        """Get the stack of tasks that led to the failure.
+        The final task in the stack is the disabled task, while the first
+        is the initial requested task."""
+        return self._task_stack

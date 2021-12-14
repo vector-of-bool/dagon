@@ -4,12 +4,12 @@ import types
 from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, NoReturn, Tuple, Type
 
-from .task_graph import TaskT
+from .ll_dag import NodeT
 
 ExceptionInfo = Tuple[Type[BaseException], BaseException, types.TracebackType]
 
 
-class TaskSuccess(NamedTuple):
+class Success(NamedTuple):
     """
     Represents a successful execution of a task to completion
     """
@@ -17,13 +17,13 @@ class TaskSuccess(NamedTuple):
     "The value that resulted from the task's execution (i.e. the return value)"
 
 
-class TaskCancellation:
+class Cancellation:
     """
     Represents that a task was cancelled before completing.
     """
 
 
-class TaskFailure(NamedTuple):
+class Failure(NamedTuple):
     """
     Represents that a task failed with an exception
     """
@@ -59,11 +59,11 @@ class TaskFailure(NamedTuple):
 
 
 @dataclass(frozen=True)
-class TaskResult(Generic[TaskT]):
+class NodeResult(Generic[NodeT]):
     """
     The result of a task's execution
     """
-    task: TaskT
+    task: NodeT
     "The task that produced the result"
-    result: TaskSuccess | TaskCancellation | TaskFailure
+    result: Success | Cancellation | Failure
     "The actual result: A success, cancellation, or failure"
