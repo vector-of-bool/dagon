@@ -28,6 +28,10 @@ include = ["dagon/"]
 strict = ["**"]
 typeshed-path = "typings"
 
+[tool.poetry.plugins."dagon.extensions"]
+"dagon.events" = "dagon.event.ext:EventsExt"
+"dagon.options" = "dagon.option.ext:OptionsExt"
+
 [tool.pytest.ini_options]
 filterwarnings = [
     "error"
