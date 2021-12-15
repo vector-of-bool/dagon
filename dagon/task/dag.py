@@ -59,7 +59,10 @@ class TaskDAG:
         self._tasks[task.name] = cast(OpaqueTask, task)
         return task
 
-    def _collect(self, mark: str, stack: list[str]) -> Iterable[OpaqueTask]:
+    def _collect(self, mark: str, stack: list[str], marked: set[str]) -> Iterable[OpaqueTask]:
+        if mark in marked:
+            return
+
         # Check that we actually have this task
         if mark not in self._tasks:
             cand = max(self.tasks, key=lambda t: difflib.SequenceMatcher(None, t.name, mark).ratio(), default=None)
@@ -76,18 +79,19 @@ class TaskDAG:
 
         # Yield this item
         yield t
+        marked.add(t.name)
 
         # Yield each hard dependency
         for d in t.depends:
-            if d.is_order_only:
+            if d.is_order_only or d.dep_name in marked:
                 continue
-            yield from self._collect(d.dep_name, stack)
+            yield from self._collect(d.dep_name, stack, marked)
 
         # Pop from the search stack
         stack.pop()
 
     def low_level_graph(self, marks: Iterable[str]) -> LowLevelDAG[Task[Any]]:
-        by_name = {t.name: t for t in (itertools.chain.from_iterable(self._collect(m, []) for m in marks))}
+        by_name = {t.name: t for t in (itertools.chain.from_iterable(self._collect(m, [], set()) for m in marks))}
         return LowLevelDAG[Task[Any]](
             nodes=by_name.values(),
             edges=itertools.chain.from_iterable(

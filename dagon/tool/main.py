@@ -16,13 +16,13 @@ from pathlib import Path
 from typing import Iterable, NoReturn, Optional, Sequence, cast
 
 import pkg_resources
-from dagon.core.result import Cancellation, Failure
-from dagon.event.event import EventsPlugin
-from dagon.plugin import PluginAwareExecutor, PluginSet
-from dagon.plugin.output import PrintCollector
-from dagon.task.dag import TaskDAG, populate_dag_context
-from dagon.task.task import DisabledTaskError, InvalidTask
-from typing_extensions import Protocol
+
+from ..core.result import Cancellation, Failure
+from ..ext.exec import ExtAwareExecutor
+from ..ext.loader import ExtLoader
+from ..task.dag import TaskDAG, populate_dag_context
+from ..task.task import DisabledTaskError, InvalidTask
+from ..tool.args import ParsedArgs, get_argparser
 
 _g_loading_dag = False
 
@@ -53,42 +53,6 @@ def _configure_logging(level: int) -> None:
     logging.basicConfig(level=level, format='[dagon] %(message)s')
 
 
-class ArgParseResult(Protocol):
-    tasks: Sequence[str]
-    list_tasks: bool
-    no_doc: bool
-    eager_fail_stop: bool
-    debug: bool
-
-
-def get_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('tasks', nargs='*', help='Tasks to execute')
-    parser.add_argument('-o', '--opt', dest='opts', action='append', help='Specify an option')
-    parser.add_argument('-lt', '--list-tasks', action='store_true')
-    parser.add_argument('--fake', action='store_true', help='Do not execute any tasks, only pretend.')
-    parser.add_argument('--database-path',
-                        '-db',
-                        help='Path to the database file to use. Defaults to `.dagon.db`',
-                        default=os.environ.get('DAGON_DATABASE_PATH', '.dagon.db'))
-    parser.add_argument('--generate-timeline',
-                        '-GT',
-                        help='Generate a timeline HTML file (dagon-timeline.html)',
-                        action='store_true')
-    parser.add_argument('--no-doc', action='store_true', help='Do not print docstrings when listing tasks/options')
-    parser.add_argument('-j', '--jobs', type=int, help='Maximum number of parallel jobs to run')
-    parser.add_argument('--eager-fail-stop',
-                        action='store_true',
-                        help='Cancel running tasks immediately when a task fails')
-    parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--interface',
-                        '-ui',
-                        help='Set the user inferface kind',
-                        choices=['simple', 'fancy', 'auto', 'test'],
-                        default='auto')
-    return parser
-
-
 def _print_failure(task_name: str, fail: Failure) -> None:
     if isinstance(fail.exception, asyncio.CancelledError):
         # Don't print exceptions which are just task cancellations
@@ -110,7 +74,7 @@ def _print_failure(task_name: str, fail: Failure) -> None:
         traceback.print_exception(fail.exception_type, fail.exception, fail.traceback)
 
 
-def run_with_args(dag: TaskDAG, args: ArgParseResult, default_tasks: Optional[Sequence[str]]) -> int:
+def run_with_args(dag: TaskDAG, exts: ExtLoader, args: ParsedArgs, default_tasks: Optional[Sequence[str]]) -> int:
     if args.list_tasks:
         return _list_tasks(dag, with_docs=not args.no_doc)
 
@@ -132,13 +96,7 @@ def run_with_args(dag: TaskDAG, args: ArgParseResult, default_tasks: Optional[Se
             print(f'No such task "{e.key}".', file=sys.stderr)
         return 1
 
-    printer = PrintCollector()
-    printer.on_print.connect(sys.__stdout__.write)
-
-    plugins = PluginSet()
-    plugins.load(EventsPlugin())
-    plugins.load(printer)
-    exe = PluginAwareExecutor(plugins, ll_dag)
+    exe = ExtAwareExecutor(exts, ll_dag)
 
     results = exe.run_all_until_complete()
     failed = False
@@ -157,16 +115,22 @@ def run_with_args(dag: TaskDAG, args: ArgParseResult, default_tasks: Optional[Se
 
 
 def run_for_dag(dag: TaskDAG,
+                exts: ExtLoader,
                 *,
                 argv: Optional[Sequence[str]] = None,
                 default_tasks: Optional[Sequence[str]] = None) -> int:
-    argv = argv or sys.argv[1:]
-    parser = get_argparser()
-    args = cast(ArgParseResult, parser.parse_args(argv))
-    return run_with_args(dag, args, default_tasks)
+    argv = argv if argv is not None else sys.argv[1:]
+    parser = get_argparser(exts)
+    args = cast(ParsedArgs, parser.parse_args(argv))
+    exts.handle_options(cast(argparse.Namespace, args))
+    return run_with_args(dag, exts, args, default_tasks)
 
 
-class MainArgParseResults(ArgParseResult):
+def get_extensions() -> ExtLoader:
+    return ExtLoader.default()
+
+
+class MainArgParseResults(ParsedArgs):
     file: Optional[str]
     module: Optional[str]
     dir: Optional[Path]
@@ -174,7 +138,13 @@ class MainArgParseResults(ArgParseResult):
 
 
 def main(argv: Sequence[str]) -> int:
-    parser = get_argparser()
+    exts = get_extensions()
+    with exts.app_context():
+        return _main(argv, exts)
+
+
+def _main(argv: Sequence[str], exts: ExtLoader) -> int:
+    parser = get_argparser(exts)
     parser.add_argument('-f', '--file', help='The file that defines the tasks')
     parser.add_argument('-m', '--module', help='The module to import to define the tasks')
     parser.add_argument('--dir',
@@ -187,6 +157,7 @@ def main(argv: Sequence[str]) -> int:
         action='store_true',
     )
     args = cast(MainArgParseResults, parser.parse_args(argv))
+    exts.handle_options(cast(argparse.Namespace, args))
 
     if args.version:
         version = pkg_resources.get_distribution('dagon').version
@@ -231,7 +202,7 @@ def main(argv: Sequence[str]) -> int:
     finally:
         _g_loading_dag = False
         sys.path = prev_path
-    return run_with_args(dag, args, default_tasks=[])
+    return run_with_args(dag, exts, args, default_tasks=[])
 
 
 # def execute_default(*, dag: TaskDAG | None = None, default: Sequence[str] | None = None) -> None:

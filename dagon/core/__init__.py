@@ -1,6 +1,6 @@
-from .ll_dag import LowLevelDAG
-from .result import NodeResult, Success, Failure, Cancellation
 from .exec import SimpleExecutor
+from .ll_dag import LowLevelDAG
+from .result import Cancellation, Failure, NodeResult, Success
 
 __all__ = [
     'LowLevelDAG',

@@ -3,8 +3,8 @@ import itertools
 import dagon.task as mod
 from dagon.util.testing import async_test
 
-from .dag import TaskDAG, result_of
 from ..core.result import NodeResult, Success
+from .dag import TaskDAG, result_of
 
 # pyright: reportUnusedFunction=false
 

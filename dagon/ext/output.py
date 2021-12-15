@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import sys
-from contextlib import ExitStack, contextmanager, nullcontext
-from typing import Iterator, TextIO
+from contextlib import ExitStack, asynccontextmanager, contextmanager
+from typing import AsyncIterator, Iterator, TextIO
 
 from dagon.event import Event, events
-from dagon.plugin.base import BasePlugin
-from dagon.plugin.iface import OpaqueTaskGraphView
 from dagon.task.dag import OpaqueTask
-from dagon.util import unused
+from dagon.util import AsyncNullContext, unused
+
+from .base import BaseExtension
+from .iface import OpaqueTaskGraphView
 
 
-class PrintCollector(BasePlugin['PrintCollector', None]):
-    dagon_plugin_name = 'dagon.print'
-    dagon_plugin_requires = ['dagon.events']
+class PrintCollector(BaseExtension[None, 'PrintCollector', None]):
+    dagon_ext_name = 'dagon.print'
+    dagon_ext_requires = ['dagon.events']
 
     def __init__(self):
         self._stdout: TextIO | None = None
@@ -31,6 +32,7 @@ class PrintCollector(BasePlugin['PrintCollector', None]):
             def write(self, dat: str) -> None:  # pylint: disable=no-self-use
                 # pylint: disable=protected-access
                 evh.on_print.emit(dat)
+                sys.__stdout__.write(dat)
 
             def flush(self) -> None:
                 pass
@@ -44,8 +46,8 @@ class PrintCollector(BasePlugin['PrintCollector', None]):
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-    @contextmanager
-    def global_context(self, graph: OpaqueTaskGraphView) -> Iterator[PrintCollector]:
+    @asynccontextmanager
+    async def global_context(self, graph: OpaqueTaskGraphView) -> AsyncIterator[PrintCollector]:
         unused(graph)
         with ExitStack() as st:
             st.enter_context(self._patch_stdout())
@@ -53,4 +55,4 @@ class PrintCollector(BasePlugin['PrintCollector', None]):
 
     def task_context(self, task: OpaqueTask):
         events.register('dagon.print', self.on_print)
-        return nullcontext()
+        return AsyncNullContext()

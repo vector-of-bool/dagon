@@ -1,4 +1,5 @@
-from .event import (Event, events, interval_context, interval_end, interval_start)
+from .event import Event
+from .ext import events, interval_context, interval_end, interval_start, mark
 
 __all__ = [
     'Event',
@@ -6,4 +7,5 @@ __all__ = [
     'interval_start',
     'interval_end',
     'interval_context',
+    'mark',
 ]

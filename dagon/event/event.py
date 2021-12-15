@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import contextvars
 import traceback
 import warnings
-from contextlib import contextmanager
-from typing import Any, Callable, Dict, Generic, Iterator, NamedTuple
+from typing import Any, Callable, Dict, Generic, NamedTuple
 
-from dagon.plugin.base import BasePlugin
-from dagon.task.dag import OpaqueTask
-from dagon.util import T, scope_set_contextvar, unused
+from dagon.util import T, unused
 
 Handler = Callable[[T], Any]
 HandlerMap = Dict['ConnectionToken', Handler[T]]
@@ -94,62 +90,3 @@ class EventMap:
         if e is None:
             e = self.register(name, factory())
         return e
-
-
-_CTX_EVENTS = contextvars.ContextVar[EventMap]('_CTX_EVENTS')
-
-
-class _EventsContextLookup:
-    @staticmethod
-    def _ctx() -> EventMap:
-        try:
-            return _CTX_EVENTS.get()
-        except LookupError:
-            raise RuntimeError('Cannot use dagon.event.events outside of a task context!')
-
-    def __getitem__(self, key: str) -> Event[Any]:
-        return self._ctx()[key]
-
-    def get(self, key: str) -> Event[Any] | None:
-        return self._ctx().get(key)
-
-    def get_or_register(self, name: str, factory: Callable[[], Event[T]]) -> Event[T]:
-        return self._ctx().get_or_register(name, factory)
-
-    def register(self, name: str, ev: Event[T]) -> Event[T]:
-        return self._ctx().register(name, ev)
-
-
-events = _EventsContextLookup()
-
-
-class EventsPlugin(BasePlugin[None, None]):
-    dagon_plugin_name = 'dagon.events'
-
-    def task_context(self, task: OpaqueTask):
-        map = EventMap()
-        map.register('dagon.interval-start', Event[str]())
-        map.register('dagon.interval-end', Event[None]())
-        map.register('dagon.mark', Event[None]())
-        return scope_set_contextvar(_CTX_EVENTS, map)
-
-
-def interval_start(name: str) -> None:
-    events['dagon.interval-start'].emit(name)
-
-
-def interval_end() -> None:
-    events['dagon.interval-end'].emit(None)
-
-
-@contextmanager
-def interval_context(name: str) -> Iterator[None]:
-    interval_start(name)
-    try:
-        yield
-    finally:
-        interval_end()
-
-
-def mark(name: str) -> None:
-    events['dagon.mark'].emit(name)

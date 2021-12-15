@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from dagon.core.result import NodeResult, Success
 
 from . import dag as dag_mod
-from dagon.core.result import NodeResult, Success
 from .task import Dependency, Task
 
 

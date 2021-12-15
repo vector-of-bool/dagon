@@ -26,6 +26,7 @@ with the result.
 from __future__ import annotations
 
 import sys
+from contextlib import ExitStack
 from typing import NoReturn, Sequence
 
 from dagon.task import dag
@@ -35,6 +36,10 @@ try:
     dag.current_dag()
 except RuntimeError:
     dag.set_current_dag(dag.TaskDAG('<script-mode>'))
+
+_EXTENSIONS = main.get_extensions()
+_ST = ExitStack()
+_ST.enter_context(_EXTENSIONS.app_context())
 
 
 def run(argv: Sequence[str] | None = None, *, default_tasks: Sequence[str] | None = None) -> NoReturn:
@@ -50,8 +55,10 @@ def run(argv: Sequence[str] | None = None, *, default_tasks: Sequence[str] | Non
 
     :raises SystemExit: Unconditionally.
     """
-    sys.exit(main.run_for_dag(
-        dag.current_dag(),
-        argv=argv,
-        default_tasks=default_tasks,
-    ))
+    with _ST:
+        sys.exit(main.run_for_dag(
+            dag.current_dag(),
+            _EXTENSIONS,
+            argv=argv,
+            default_tasks=default_tasks,
+        ))

@@ -8,7 +8,7 @@ import asyncio
 import sys
 from typing import Any, Awaitable, Callable, Generic, cast
 
-from dagon.util import Opaque
+from dagon.util import Opaque, ReadyAwaitable
 
 from .ll_dag import LowLevelDAG, NodeT
 from .result import Cancellation, ExceptionInfo, Failure, NodeResult, Success
@@ -79,11 +79,11 @@ class SimpleExecutor(Generic[NodeT]):
         """Whether the execution is finished and no more work will be queued"""
         return self._finished
 
-    def on_start(self) -> None:
-        pass
+    def on_start(self) -> Awaitable[None]:
+        return ReadyAwaitable(None)
 
-    def on_finish(self) -> None:
-        pass
+    def on_finish(self) -> Awaitable[None]:
+        return ReadyAwaitable(None)
 
     def result_of(self, t: NodeT) -> Awaitable[NodeResult[NodeT]]:
         """Obtain the awaitable on the result of the given node"""
@@ -110,7 +110,7 @@ class SimpleExecutor(Generic[NodeT]):
         """
         assert not self.finished, 'run_some() called on finished executor'
         if not self._started and self.has_pending_work:
-            self.on_start()
+            await self.on_start()
             self._started = True
 
         if not self._any_failed:
@@ -151,7 +151,7 @@ class SimpleExecutor(Generic[NodeT]):
 
         if not self.has_pending_work or (self._any_failed and not self.has_running_work):
             self._finished = True
-            self.on_finish()
+            await self.on_finish()
 
         return ret
 

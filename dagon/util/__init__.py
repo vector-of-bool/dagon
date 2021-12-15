@@ -1,21 +1,52 @@
 from __future__ import annotations
-from contextlib import ExitStack
-import contextvars
 
-from typing import Any, Callable, ContextManager, Generic, Iterable, TypeVar, cast
+import contextvars
+import types
+from contextlib import ExitStack
+from typing import (TYPE_CHECKING, Any, AsyncContextManager, Awaitable, Callable, ContextManager, Generator, Generic,
+                    Iterable, Type, TypeVar, cast, overload)
+
 from typing_extensions import Protocol
 
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
+U = TypeVar('U')
 
 
+class UndefinedType:
+    _inst: UndefinedType | None = None
+
+    def __new__(cls) -> UndefinedType:
+        if cls._inst is None:
+            cls._inst = super().__new__(cls)
+        return cls._inst
+
+
+Undefined = UndefinedType()
+
+
+@overload
 def first(items: Iterable[T]) -> T:
+    pass
+
+
+@overload
+def first(items: Iterable[T], *, default: U) -> T | U:
+    ...
+
+
+_FirstNoArg = object()
+
+
+def first(items: Iterable[T], *, default: U | object = _FirstNoArg) -> T | U:
     """
     Return the first element from an iterable object.
     """
     for n in items:
         return n
-    raise ValueError(f'No first item in an empty iterable ({items!r})')
+    if default is _FirstNoArg:
+        raise ValueError(f'No first item in an empty iterable ({items!r})')
+    return cast(U, default)
 
 
 def unused(*args: Any) -> None:
@@ -92,3 +123,42 @@ def on_context_exit(cb: Callable[[], None]) -> ContextManager[None]:
 def scope_set_contextvar(cvar: contextvars.ContextVar[T], value: T) -> ContextManager[None]:
     tok = cvar.set(value)
     return on_context_exit(lambda: cvar.reset(tok))
+
+
+class ReadyAwaitable(Generic[T]):
+    """
+    An Awaitable object that when awaited will immediately resolve to a given
+    value without suspending the awaiting coroutine.
+
+    :param value: The value that will be returned from the ``await`` expression.
+    """
+    def __init__(self, value: T):
+        self._value = value
+
+    def __await__(self) -> Generator[None, None, T]:
+        return self._value
+        # Unreachable 'yield', but makes this function into a generator
+        yield None
+
+
+class AsyncNullContext(Generic[T]):
+    def __init__(self, value: T = None) -> None:
+        self._value = value
+
+    def __aenter__(self) -> Awaitable[T]:
+        return ReadyAwaitable(self._value)
+
+    def __aexit__(self, _exc_t: Type[BaseException] | None, _exc: BaseException | None,
+                  _tb: types.TracebackType | None) -> Awaitable[None]:
+        return ReadyAwaitable(None)
+
+
+def typecheck(iface: Type[T]) -> Callable[[Type[T]], None]:
+    unused(iface)
+    assert False, TypeError('typecheck() should never by called at runtime')
+    return lambda f: None  # Unreachable, but makes Pylint happy
+
+
+if TYPE_CHECKING:
+    typecheck(AsyncContextManager[None])(AsyncNullContext[None])
+    typecheck(AsyncContextManager[int])(AsyncNullContext[int])

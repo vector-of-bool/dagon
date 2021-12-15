@@ -6,9 +6,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Type
 
+from dagon.util import T, kebab_name
+
 from .dag import TaskDAG, current_dag, result_of
 from .task import Dependency, Task, TaskFunction
-from dagon.util import T, kebab_name
 
 __all__ = [
     'define',
