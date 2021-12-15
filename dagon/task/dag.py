@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextvars
-import difflib
 import itertools
 from contextlib import contextmanager
 from typing import (Any, Awaitable, Callable, Iterable, Iterator, NamedTuple, TypeVar, cast, overload)
@@ -9,7 +8,7 @@ from typing import (Any, Awaitable, Callable, Iterable, Iterator, NamedTuple, Ty
 from dagon.core import exec
 from dagon.core.ll_dag import LowLevelDAG
 from dagon.core.result import NodeResult, Success
-from dagon.util import NoneSuch, Opaque, first
+from dagon.util import NoneSuch, Opaque, first, nearest_matching
 
 from .task import DisabledTaskError, InvalidTask, Task
 
@@ -52,9 +51,7 @@ class TaskDAG:
         for dep in task.depends:
             if dep.dep_name not in self._tasks.keys():
                 # pylint: disable=cell-var-from-loop
-                cand = max(self.tasks,
-                           key=lambda t: difflib.SequenceMatcher(None, t.name, dep.dep_name).ratio(),
-                           default=None)
+                cand = nearest_matching(dep.dep_name, self.tasks, key=lambda t: t.name)
                 raise InvalidTask(NoneSuch[OpaqueTask](dep.dep_name, cand))
         self._tasks[task.name] = cast(OpaqueTask, task)
         return task
@@ -65,7 +62,7 @@ class TaskDAG:
 
         # Check that we actually have this task
         if mark not in self._tasks:
-            cand = max(self.tasks, key=lambda t: difflib.SequenceMatcher(None, t.name, mark).ratio(), default=None)
+            cand = nearest_matching(mark, self.tasks, key=lambda t: t.name)
             raise InvalidTask(NoneSuch[OpaqueTask](mark, cand))
 
         # Append to the search stack

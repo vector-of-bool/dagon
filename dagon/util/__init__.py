@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import contextvars
 import types
 from contextlib import ExitStack
@@ -74,6 +75,9 @@ class NoneSuch(Generic[T]):
     def candidate(self) -> T | None:
         """The best-matching candidate"""
         return self._cand
+
+    def __repr__(self) -> str:
+        return f'<NoneSuch given="{self.key}" nearest={self.candidate!r}>'
 
 
 class Opaque(Protocol):
@@ -162,3 +166,7 @@ def typecheck(iface: Type[T]) -> Callable[[Type[T]], None]:
 if TYPE_CHECKING:
     typecheck(AsyncContextManager[None])(AsyncNullContext[None])
     typecheck(AsyncContextManager[int])(AsyncNullContext[int])
+
+
+def nearest_matching(given: str, strs: Iterable[T], key: Callable[[T], str]) -> T | None:
+    return max(strs, key=lambda t: difflib.SequenceMatcher(None, given, key(t)).ratio(), default=None)
