@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from asyncio import Semaphore
 from contextlib import asynccontextmanager, nullcontext
-from typing import (Any, AsyncContextManager, AsyncIterator, ContextManager, Hashable, NamedTuple, Sequence)
+from typing import (Any, AsyncContextManager, AsyncIterator, ContextManager, Hashable, NamedTuple)
 
 from dagon.ext.iface import OpaqueTaskGraphView
 from dagon.task.dag import OpaqueTask
