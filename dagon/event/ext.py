@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import contextvars
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import ExitStack, asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Callable, Iterator
+from dagon.event.cancel import CancellationToken
 
 from dagon.ext.base import BaseExtension
 from dagon.task.dag import OpaqueTask
@@ -46,7 +47,9 @@ class EventsExt(BaseExtension[None, None, None]):
         map.register('dagon.interval-start', Event[str]())
         map.register('dagon.interval-end', Event[None]())
         map.register('dagon.mark', Event[None]())
-        with scope_set_contextvar(_CTX_EVENTS, map):
+        with ExitStack() as st:
+            st.enter_context(scope_set_contextvar(_CTX_EVENTS, map))
+            st.enter_context(CancellationToken.scoped_context_local(CancellationToken()))
             yield
 
 
