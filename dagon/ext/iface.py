@@ -20,6 +20,11 @@ class IExtension(Generic[AppDataT, GlobalDataT, TaskDataT], Protocol):
         ...
 
     @property
+    def dagon_ext_requires_opt(self) -> Iterable[str]:
+        """Extensions that are optionally used by this extension"""
+        ...
+
+    @property
     def dagon_ext_name(self) -> str:
         """The name of the extension"""
         ...

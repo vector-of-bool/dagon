@@ -110,6 +110,11 @@ class ExtLoader:
             if r not in self._loaded:
                 raise RuntimeError(f'No extension "{r}" is registered, but is required by "{p.dagon_ext_name}"')
             yield from self._iter_order_1(self._loaded[r], visited)
+        for r in p.dagon_ext_requires_opt:
+            if r in visited:
+                continue
+            if r in self._loaded:
+                yield from self._iter_order_1(self._loaded[r], visited)
         if p.dagon_ext_name not in visited:
             yield p
             visited.add(p.dagon_ext_name)
