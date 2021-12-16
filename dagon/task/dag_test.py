@@ -17,8 +17,8 @@ def test_simple() -> None:
         ran += 1
         print('Ran!')
 
-    t1 = Task[None](name='foo', fn=simple_fn, deps=[], default=False)
-    t2 = Task[None](name='bar', fn=simple_fn, deps=[Dependency('foo', is_order_only=False)], default=False)
+    t1 = Task[None](name='foo', fn=simple_fn, depends=[], default=False)
+    t2 = Task[None](name='bar', fn=simple_fn, depends=[Dependency('foo', is_order_only=False)], default=False)
 
     dag = dag_mod.TaskDAG('test')
     # Try in the wrong order
@@ -49,8 +49,8 @@ def test_simple_with_result():
         assert val == 2
         return 2 * val
 
-    t1 = Task[int](name='foo', fn=simple_two, deps=[], default=False)
-    t2 = Task[int](name='bar', fn=twice_prior, deps=[Dependency('foo', is_order_only=False)])
+    t1 = Task[int](name='foo', fn=simple_two, depends=[], default=False)
+    t2 = Task[int](name='bar', fn=twice_prior, depends=[Dependency('foo', is_order_only=False)])
     dag = dag_mod.TaskDAG('test')
     dag.add_task(t1)
     dag.add_task(t2)

@@ -31,14 +31,14 @@ class Task(Generic[T]):
     def __init__(self,
                  name: str,
                  fn: TaskFunction[T],
-                 deps: Iterable[Dependency],
+                 depends: Iterable[Dependency],
                  default: bool = True,
                  doc: str = '',
                  disabled_reason: str | None = None):
         self._name = name
         self._doc = doc
         self._fn = fn
-        self._deps = tuple(deps)
+        self._deps = tuple(depends)
         self._is_default = default
         self._disabled_reason = disabled_reason
 
