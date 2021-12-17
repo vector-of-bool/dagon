@@ -1,3 +1,10 @@
+"""
+Module ``dagon.core.result``
+############################
+
+Task result wrappers and status information
+"""
+
 from __future__ import annotations
 
 import types

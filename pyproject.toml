@@ -29,8 +29,8 @@ strict = ["**"]
 typeshed-path = "typings"
 
 [tool.poetry.plugins."dagon.extensions"]
-"dagon.events" = "dagon.event.ext:EventsExt"
-"dagon.options" = "dagon.option.ext:OptionsExt"
+"dagon.events" = "dagon.event.ext:_EventsExt"
+"dagon.options" = "dagon.option.ext:_OptionsExt"
 "dagon.pools" = "dagon.pool:_PoolsExt"
 
 [tool.pytest.ini_options]

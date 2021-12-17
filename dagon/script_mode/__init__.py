@@ -1,4 +1,7 @@
 """
+Module ``dagon.script_mode``
+############################
+
 .. note::
     This is a special module that should only be imported by Python scripts
     that are executed directly.
@@ -18,7 +21,7 @@ The :func:`run` function will not return, it will raise :class:`SystemExit`
 with the result.
 
 .. note::
-    The ``dagon.script_mode`` module **must** be imported before any task
+    The ``dagon.script_mode`` module must be imported **before** any task
     definitions. Importing this module has side-effects, and it should not be
     used outside of Python executable scripts.
 """
@@ -31,15 +34,17 @@ from typing import NoReturn, Sequence
 
 from dagon.task import dag
 from dagon.tool import main
+from ..util.doc import __sphinx_build__
 
-try:
-    dag.current_dag()
-except RuntimeError:
-    dag.set_current_dag(dag.TaskDAG('<script-mode>'))
+if not __sphinx_build__:
+    try:
+        dag.current_dag()
+    except RuntimeError:
+        dag.set_current_dag(dag.TaskDAG('<script-mode>'))
 
-_EXTENSIONS = main.get_extensions()
-_ST = ExitStack()
-_ST.enter_context(_EXTENSIONS.app_context())
+    _EXTENSIONS = main.get_extensions()
+    _ST = ExitStack()
+    _ST.enter_context(_EXTENSIONS.app_context())
 
 
 def run(argv: Sequence[str] | None = None, *, default_tasks: Sequence[str] | None = None) -> NoReturn:

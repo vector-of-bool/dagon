@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from . import proc
+from dagon import proc
 
 
 @pytest.mark.asyncio

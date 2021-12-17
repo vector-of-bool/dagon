@@ -1,3 +1,9 @@
+"""
+Module ``dagon.util``
+#####################
+
+General utilities
+"""
 from __future__ import annotations
 
 import difflib
@@ -10,11 +16,17 @@ from typing import (TYPE_CHECKING, Any, AsyncContextManager, Awaitable, Callable
 from typing_extensions import Protocol
 
 T = TypeVar('T')
+"A generic invariant type variable"
 T_co = TypeVar('T_co', covariant=True)
+"A generic covariant type variable"
 U = TypeVar('U')
+"A second generic invariant type variable"
 
 
 class UndefinedType:
+    """
+    The type of the generic :const:`Undefined` constant.
+    """
     _inst: UndefinedType | None = None
 
     def __new__(cls) -> UndefinedType:
@@ -24,11 +36,15 @@ class UndefinedType:
 
 
 Undefined = UndefinedType()
+"""
+An 'undefined' constant to be used to represent the absence of parameter/return
+values where `None` is within the domain of that parameter or return value.
+"""
 
 
 @overload
 def first(items: Iterable[T]) -> T:
-    pass
+    ...
 
 
 @overload
@@ -36,18 +52,21 @@ def first(items: Iterable[T], *, default: U) -> T | U:
     ...
 
 
-_FirstNoArg = object()
-
-
-def first(items: Iterable[T], *, default: U | object = _FirstNoArg) -> T | U:
+def first(items: Iterable[T], **kw: U) -> T | U:
     """
-    Return the first element from an iterable object.
+    Obtain the first element of an iterable
+
+    :param items: An iterable object
+    :param default: A default value to return in case of an empty iterable.
+
+    :raises ValueError: If `items` is empty and no `default` was provided
+        omitted, `ValueError` will be raised in case of an empty iterable.
     """
     for n in items:
         return n
-    if default is _FirstNoArg:
+    if 'default' not in kw:
         raise ValueError(f'No first item in an empty iterable ({items!r})')
-    return cast(U, default)
+    return kw['default']
 
 
 def unused(*args: Any) -> None:
@@ -88,9 +107,9 @@ class Opaque(Protocol):
         ...
 
 
-def kebab_name(name: str) -> str:
+def dot_kebab_name(name: str) -> str:
     """
-    Convert a ``snake_case`` name into a ``kebab-case`` name, and strip
+    Convert a ``snake_case`` name into a ``dot.kebab-case`` name, and strip
     leading/trailing underscores. Double underscores ``__`` are converted to
     a dot ``.``.
 
@@ -119,19 +138,25 @@ def kebab_name(name: str) -> str:
 
 
 def on_context_exit(cb: Callable[[], None]) -> ContextManager[None]:
+    """Create a context manager that simply calls the given callback on ``__exit__``"""
     st = ExitStack()
     st.callback(cb)
     return cast(ContextManager[None], st)
 
 
 def scope_set_contextvar(cvar: contextvars.ContextVar[T], value: T) -> ContextManager[None]:
+    """
+    Create a context manager that sets the
+    `context variable <contextvars.ContextVar>` to the given value, then resets
+    the value on ``__exit__``
+    """
     tok = cvar.set(value)
     return on_context_exit(lambda: cvar.reset(tok))
 
 
 class ReadyAwaitable(Generic[T]):
     """
-    An Awaitable object that when awaited will immediately resolve to a given
+    An `Awaitable` object that when awaited will immediately resolve to a given
     value without suspending the awaiting coroutine.
 
     :param value: The value that will be returned from the ``await`` expression.
@@ -146,6 +171,9 @@ class ReadyAwaitable(Generic[T]):
 
 
 class AsyncNullContext(Generic[T]):
+    """
+    Like `~contextlib.nullcontext`, but implements an `~typing.AsyncContextManager`
+    """
     def __init__(self, value: T = None) -> None:
         self._value = value
 
@@ -158,6 +186,11 @@ class AsyncNullContext(Generic[T]):
 
 
 def typecheck(iface: Type[T]) -> Callable[[Type[T]], None]:
+    """
+    Given a type, return a callable that accepts that type. This can be used
+    to insert type checks into modules. Should not be called at runtime: guard
+    this with a `typing.TYPE_CHECKING` condition.
+    """
     unused(iface)
     assert False, TypeError('typecheck() should never by called at runtime')
     return lambda f: None  # Unreachable, but makes Pylint happy
@@ -168,5 +201,27 @@ if TYPE_CHECKING:
     typecheck(AsyncContextManager[int])(AsyncNullContext[int])
 
 
-def nearest_matching(given: str, strs: Iterable[T], key: Callable[[T], str]) -> T | None:
-    return max(strs, key=lambda t: difflib.SequenceMatcher(None, given, key(t)).ratio(), default=None)
+def nearest_matching(given: str, of: Iterable[T], key: Callable[[T], str]) -> T | None:
+    """
+    Find the object that is "nearest" to the `given` string based on the string
+    distance. Each object should be mapped to a string with the `key` function.
+
+    If `of` is empty, returns `None`.
+    """
+    return max(of, key=lambda t: difflib.SequenceMatcher(None, given, key(t)).ratio(), default=None)
+
+
+def fixup_dataclass_docs(cls: Type[T]) -> Type[T]:
+    cls.__init__.__qualname__ = f'{cls.__name__}.__init__'
+    return cls
+
+
+def ensure_awaitable(val: Awaitable[T] | T) -> Awaitable[T]:
+    """
+    Take an object that may or may not be `~typing.Awaitable` at runtime, and
+    ensure that it is awaitable. If the given object is not awaitable, it will
+    be wrapped in a `.ReadyAwaitable`.
+    """
+    if isinstance(val, Awaitable):
+        return cast(Awaitable[T], val)
+    return ReadyAwaitable(val)

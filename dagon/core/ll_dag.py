@@ -1,5 +1,20 @@
 """
-Provides a low-level generic task-aware DAG implementation.
+Module ``dagon.core.ll_dag``
+############################
+
+This module provides a low-level generic task-aware DAG implementation.
+
+The main class is `.LowLevelDAG`, which tracks node states and
+dependencies between nodes.
+
+No semantics are imposed on the node objects given to a `.LowLevelDAG`,
+other than they must be valid as keys in a `set` or `dict` (They must be
+`Hashable`).
+
+This class neither concerns itself with "executing" a node. It is up to a user
+of `.LowLevelDAG` to execute the nodes.
+
+A simple low-level execution API can be found in `dagon.core.exec`.
 """
 from __future__ import annotations
 
@@ -9,6 +24,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Generic, Hashable, Iterable, Sequence, TypeVar
 
 from typing_extensions import TypeAlias
+
+from dagon.util import fixup_dataclass_docs
 
 NodeT = TypeVar('NodeT', bound=Hashable)
 """
@@ -22,54 +39,85 @@ class GraphError(RuntimeError):
     """
 
 
-@dataclass
+@fixup_dataclass_docs
+@dataclass()
 class GraphStateError(RuntimeError):
+    """
+    Raised by an attempted operation on the graph when the graph is in an
+    invalid state for that operation.
+    """
     node: Any
+    "The node that is in an invalid state"
 
 
+@fixup_dataclass_docs
 @dataclass
 class CycleError(GraphError, Generic[NodeT]):
+    """
+    Exception raised when adding an edge to a graph would create a dependency cycle.
+    """
     hint: Sequence[NodeT]
+    """The sequence of nodes that were discovered forming a cycle"""
 
 
+@fixup_dataclass_docs
 @dataclass()
 class DuplicateNodeError(GraphError):
+    """
+    Exception raised when attempting to add a node that already exists within the graph.
+    """
     node: Any
+    """The node that is already present in the graph"""
 
 
+@fixup_dataclass_docs
 @dataclass()
 class DuplicateEdgeError(GraphError):
+    """
+    Exception raised when attempting to add a duplicate edge to a graph.
+    """
     edge: Edge[Any]
+    """The edge that was attempted to be added"""
 
 
+@fixup_dataclass_docs
 @dataclass()
 class MissingNodeError(GraphError):
+    """
+    Exception raised when requesting data for a node that is not a member of the graph.
+    """
     node: Any
+    """The node that was requested"""
 
 
 class NodeState(enum.Enum):
+    """The task-state of a node within the graph"""
     Pending = 0
+    "The node has not been marked running nor marked finished"
     Running = 1
+    "The node has been marked as running but has not been marked finished"
     Finished = 2
+    "The node has been marked as finished"
 
 
+@fixup_dataclass_docs
 @dataclass()
 class _GraphNodeMeta(Generic[NodeT]):
     """
     A node in the graph, containing an associated value.
     """
-    #: The object associated with this node
     value: NodeT
-    #: The number of pending inputs to this node in the current execution
+    'The object associated with this node'
     pending_inputs: int = 0
-    #: The order/"depth" of the node in the graph
+    'The number of pending inputs to this node in the current execution'
     order: int = 0
-    #: The current state of the graph
+    'The order/"depth" of the node in the graph'
     state: NodeState = NodeState.Pending
-    #: The objects that depends on this node in the graph
+    'The current state of the graph'
     outs: set[NodeT] = field(default_factory=set)
-    #: The objects upon which this node depends
+    'The objects that depends on this node in the graph'
     ins: set[NodeT] = field(default_factory=set)
+    'The objects upon which this node depends'
 
     def __deepcopy__(self, memo: Any) -> _GraphNodeMeta[NodeT]:
         return _GraphNodeMeta(self.value, self.pending_inputs, self.order, self.state, set(self.outs), set(self.ins))
@@ -83,10 +131,12 @@ class _GraphNodeMeta(Generic[NodeT]):
 @dataclass(frozen=True)
 class Edge(Generic[NodeT]):
     """
-    A edge in the graph representing a dependency of one node value on another
+    An edge in the graph representing a dependency of one node value on another.
     """
     from_: NodeT
+    "The outgoing node in the edge. This is the dependency."
     to: NodeT
+    "The inbound node of the edge. This is the dependent."
 
 
 _NodeMap: TypeAlias = Dict[NodeT, _GraphNodeMeta[NodeT]]
@@ -95,22 +145,22 @@ _NodeMap: TypeAlias = Dict[NodeT, _GraphNodeMeta[NodeT]]
 
 class LowLevelDAG(Generic[NodeT]):
     """
-    A generic directed acyclic task-aware-graph. It is a task-aware-graph
-    because a node can be marked "finished", and one can query the graph for the
-    nodes that do not have any un-finished inputs (Meaning the node is "ready").
+    A generic directed acyclic task-aware-graph. It is a *task-aware* because a
+    node can be marked "finished", and one can query the graph for the nodes
+    that do not have any un-finished inputs (Meaning the node is "ready").
 
     :param nodes: The initial nodes of the graph.
     :param edges: The initial edges of the graph.
 
-    .. seealso:: :func:`.add`
+    .. seealso:: See `.add` for parameter information
     """
     def __init__(self, *, nodes: Iterable[NodeT] = (), edges: Iterable[Edge[NodeT] | tuple[NodeT, NodeT]] = ()) -> None:
-        #: All nodes in the graph
         self._nodes: _NodeMap[NodeT] = {}
-        #: The set of nodes that are ready to be processed
+        'All nodes in the graph'
         self._ready_nodes: set[NodeT] = set()
-        #: all of the edges in the graph
+        'The set of nodes that are ready to be processed'
         self._edges: set[Edge[NodeT]] = set()
+        'all of the edges in the graph'
         # Begin by loading up all the initial nodes and edges
         self.add(nodes=nodes, edges=edges)
 
@@ -120,6 +170,22 @@ class LowLevelDAG(Generic[NodeT]):
 
         :param nodes: Nodes to add to the graph.
         :param edges: Edges to add to the graph.
+
+        :raise GraphStateError: If any of the `~Edge.to` nodes in the new
+            edges are not `~.NodeState.Pending`. (You cannot add a
+            dependency to a running or finished node)
+        :raise CycleError: If any of the added edges would create a dependency
+            cycle.
+        :raise DuplicateEdgeError: If any of the given edges already exist in
+            this graph.
+        :raise DuplicateNodeError: If any of the given nodes already exist in
+            this graph.
+        :raise MissingNodeError: If any of the edges refer to nodes that are
+            not either already in the graph or added by `.nodes`.
+
+        Edges may be instances of `.Edge` or tuples of node pairs, where
+        the first element is the `~.Edge.from_` node and the second element is the
+        `~.Edge.to` node.
         """
         # Duplicate the nodes so that we can modify them in-place. Exceptions will leave the
         # graph unchanged.
@@ -147,11 +213,18 @@ class LowLevelDAG(Generic[NodeT]):
         self._ready_nodes = ready_nodes
 
     def copy(self) -> LowLevelDAG[NodeT]:
+        """
+        Create a detached clone of this graph. This will copy the node metadata
+        and edge metadata, but the nodes themselves will not be copied.
+        """
         return copy.deepcopy(self)
 
     def mark_running(self, node: NodeT) -> None:
         """
         Mark a node as "running"
+
+        .. warning:: Asserts that `node` is a member of the graph and that
+            the node has zero pending inputs.
         """
         gnode = self._nodes.get(node)
         assert gnode is not None, ('mark_running() a node which is not in the graph', node)
@@ -163,6 +236,13 @@ class LowLevelDAG(Generic[NodeT]):
     def mark_finished(self, node: NodeT) -> None:
         """
         Mark a node as "finished." This will update the ready-nodes of this graph.
+
+        .. note:: It is safe to mark a node as "finished" without having first
+            marked it as running with `.mark_running`.
+
+        .. warning:: Asserts that `node` is a member of the graph, that the
+            node has no pending inputs, and that the node has not already been
+            marked as "finished."
         """
         gnode = self._nodes.get(node)
         assert gnode is not None, ('mark_finished() a node which is not in the graph', node)
@@ -200,15 +280,19 @@ class LowLevelDAG(Generic[NodeT]):
 
     @property
     def has_ready_nodes(self) -> bool:
+        """Boolean property on whether the graph has any ready nodes."""
         return bool(self._ready_nodes)
 
     def dependencies_of(self, node: NodeT) -> Iterable[NodeT]:
+        """Iterate the direct dependencies of the given node"""
         return iter(self._nodes[node].ins)
 
     def dependents_of(self, node: NodeT) -> Iterable[NodeT]:
+        """Iterate of the the direct dependents of the given node."""
         return iter(self._nodes[node].outs)
 
     def state_of(self, node: NodeT) -> NodeState:
+        """Get the `.NodeState` of the given `node`"""
         return self._nodes[node].state
 
     def _add_edge(self, edge: Edge[NodeT], ready_nodes: set[NodeT], repl: _NodeMap[NodeT]) -> None:
@@ -299,9 +383,9 @@ class LowLevelDAG(Generic[NodeT]):
 
 class DAGView(Generic[NodeT]):
     """
-    Obtain a readonly view of a DAG graph.
+    Obtain a readonly view of a `.LowLevelDAG`.
 
-    :param graph: The graph to view
+    :param graph: The graph to view.
     """
     def __init__(self, graph: LowLevelDAG[NodeT]) -> None:
         self._graph = graph
@@ -315,7 +399,7 @@ class DAGView(Generic[NodeT]):
         return self._graph.dependents_of(node)
 
     @property
-    def nodes(self) -> Iterable[NodeT]:
+    def all_nodes(self) -> Iterable[NodeT]:
         "Iterate all the nodes in the graph"
         return self._graph.all_nodes
 

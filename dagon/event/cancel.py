@@ -24,7 +24,7 @@ class CancelLevel(enum.Enum):
 class CancellationToken:
     """
     An object that can be used to dispatch a cancellation to an asynchronous
-    operation.
+    operation or an operation running in another thread.
     """
     _CTX_LOCAL = contextvars.ContextVar['CancellationToken | None']('CancellationToken._CTX_LOCAL', default=None)
 
@@ -39,7 +39,7 @@ class CancellationToken:
 
     @property
     def cancel_level(self) -> CancelLevel | None:
-        """The current cancellation level (or None if no cancellation has happened)"""
+        """The current cancellation level (or `None` if no cancellation has happened)"""
         return self._cancel_level
 
     def connect(self, handler: Handler[CancelLevel], *, never_immediate: bool = False) -> ConnectionToken:
@@ -49,9 +49,9 @@ class CancellationToken:
         :param handler: The handler for the cancellation.
         :param never_immediate: By default, if there is a pending cancellation
             request, the handler will be invoked immediately in the calling
-            thread. If `never_immediate` is ``True``, this immediate callback
+            thread. If `never_immediate` is `True`, this immediate callback
             will not occurr. **Note:** this means a prior cancellation event
-            will not be fired.
+            will not be fired!
         """
         if self.is_cancelled and not never_immediate:
             assert self.cancel_level
@@ -88,12 +88,16 @@ class CancellationToken:
 
     @staticmethod
     def get_context_local() -> CancellationToken | None:
-        """Get the context-local cancellation token (Possibly 'None')"""
+        """Get the context-local cancellation token (Possibly `None`)"""
         return CancellationToken._CTX_LOCAL.get()
 
     @classmethod
     @contextmanager
     def scoped_context_local(cls, token: CancellationToken | None) -> Iterator[None]:
+        """
+        Create a context manager that sets the context-local cancellation token
+        to `token` for the duration of the context.
+        """
         prev = cls.get_context_local()
         cls.set_context_local(token)
         try:
@@ -102,6 +106,11 @@ class CancellationToken:
             cls.set_context_local(prev)
 
     Shield = cast('CancellationToken', object())
+    """
+    :type: CancellationToken
+
+    A cancellation token that can blocks all cancellation requests
+    """
 
 
 class _NeverCancelled(CancellationToken):

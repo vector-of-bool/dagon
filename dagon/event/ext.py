@@ -3,12 +3,12 @@ from __future__ import annotations
 import contextvars
 from contextlib import ExitStack, asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Callable, Iterator
-from dagon.event.cancel import CancellationToken
 
 from dagon.ext.base import BaseExtension
 from dagon.task.dag import OpaqueTask
 from dagon.util import T, scope_set_contextvar
 
+from .cancel import CancellationToken
 from .event import Event, EventMap
 
 _CTX_EVENTS = contextvars.ContextVar[EventMap]('_CTX_EVENTS')
@@ -38,7 +38,7 @@ class _EventsContextLookup:
 events = _EventsContextLookup()
 
 
-class EventsExt(BaseExtension[None, None, None]):
+class _EventsExt(BaseExtension[None, None, None]):
     dagon_ext_name = 'dagon.events'
 
     @asynccontextmanager
@@ -54,15 +54,31 @@ class EventsExt(BaseExtension[None, None, None]):
 
 
 def interval_start(name: str) -> None:
+    """
+    Fire a ``dagon.interval-start`` event.
+
+    .. note:: May only be called within a task-executing context.
+    """
     events['dagon.interval-start'].emit(name)
 
 
 def interval_end() -> None:
+    """
+    Fire a ``dagon.interval-end`` event.
+
+    .. note:: May only be called within a task-executing context.
+    """
     events['dagon.interval-end'].emit(None)
 
 
 @contextmanager
 def interval_context(name: str) -> Iterator[None]:
+    """
+    Create a scope for an `.interval_start` and `.interval_end` block with
+    the given name.
+
+    .. note:: May only be called within a task-executing context.
+    """
     interval_start(name)
     try:
         yield
@@ -71,4 +87,9 @@ def interval_context(name: str) -> Iterator[None]:
 
 
 def mark(name: str) -> None:
+    """
+    Emit a ``dagon.mark`` event with the given name.
+
+    .. note:: May only be called within a task-executing context.
+    """
     events['dagon.mark'].emit(name)

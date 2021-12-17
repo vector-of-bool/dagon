@@ -175,16 +175,16 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
         """The low-level graph executed by this executor"""
         return self.__graph
 
-    async def do_run_node_outer(self, node: Task[T]) -> NodeResult[Task[T]]:
+    async def do_run_node(self, node: Task[T]) -> NodeResult[Task[T]]:
         tok = _CTX_EXEC.set(_ExecCtx(self, node))
         try:
-            result = await self.do_run_task_outer(node)
+            result = await self.do_run_task(node)
         finally:
             _CTX_EXEC.reset(tok)
         return result
 
-    async def do_run_task_outer(self, node: Task[T]) -> NodeResult[Task[T]]:
-        return await super().do_run_node_outer(node)
+    async def do_run_task(self, node: Task[T]) -> NodeResult[Task[T]]:
+        return await super().do_run_node(node)
 
 
 _CURRENT_DAG = contextvars.ContextVar['TaskDAG | None']('_CURRENT_DAG', default=None)

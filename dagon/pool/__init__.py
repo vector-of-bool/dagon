@@ -1,3 +1,9 @@
+"""
+Module ``dagon.pool``
+#####################
+
+Task job pools for concurrency limits
+"""
 from __future__ import annotations
 
 from asyncio import Semaphore

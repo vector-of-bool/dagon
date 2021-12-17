@@ -27,4 +27,4 @@ class ExtAwareExecutor(TaskExecutor[Any]):
 
     async def do_run_task_outer(self, node: Task[Any]) -> Any:
         async with self._exts.task_context(node):
-            return await super().do_run_task_outer(node)
+            return await super().do_run_task(node)

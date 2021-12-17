@@ -1,12 +1,15 @@
 """
-Helpers for building a task Dag
+Module ``dagon.task``
+#####################
+
+Mid/high-level Task APIs
 """
 
 from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Iterable, Type, cast, overload
 
-from dagon.util import T, kebab_name
+from dagon.util import T, dot_kebab_name
 
 from .dag import TaskDAG, current_dag, result_of
 from .task import Dependency, Task, TaskFunction
@@ -82,7 +85,7 @@ def task_from_function(fn: TaskFunction[T],
     For more parameter information, see :class:`Task`.
     """
     if name is None:
-        name = kebab_name(fn.__name__)
+        name = dot_kebab_name(fn.__name__)
 
     from inspect import isclass
     if not isclass(cls) or not issubclass(cls, Task):
@@ -211,7 +214,7 @@ def define_fn_task(name: str,
 
     t = task_from_function(
         _fn_trampoline,
-        name=name or kebab_name(fn.__name__),
+        name=name or dot_kebab_name(fn.__name__),
         default=default,
         depends=depends,
         order_only_depends=order_only_depends,

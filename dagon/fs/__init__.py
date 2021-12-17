@@ -1,9 +1,13 @@
 """
-Module for performing filesystem tasks
+Module ``dagon.fs``
+###################
+
+Module for performing filesystem operations
 """
 
 from __future__ import annotations
 
+import functools
 import asyncio
 import errno
 import itertools
@@ -13,21 +17,20 @@ from concurrent.futures import ThreadPoolExecutor, Executor
 from io import BufferedIOBase
 from pathlib import Path, PurePath
 from typing import (TYPE_CHECKING, Any, AsyncIterable, AsyncIterator, Awaitable, Callable, Generic, Iterable, Mapping,
-                    Type, TypeVar, Union)
+                    Type, TypeVar, Union, cast)
 
 from typing_extensions import Literal, ParamSpec
 
 from ..event.cancel import CancellationToken, raise_if_cancelled
 from ..util import T
+from ..util.doc import __sphinx_build__
 
-#: A path-able argument. A string, subclass of ``PurePath``, or anything with an
-#: __fspath__ member
 Pathish = Union['os.PathLike[str]', str]
-#: Conventience type to represent either a single path or an iterable list of
-#: paths
+'A path-able argument. A string, subclass of `~pathlib.PurePath`, or anything with an ``__fspath__`` member'
 NPaths = Union[Pathish, Iterable[Pathish]]
-#: Type for predicate functions that accept a file path and return a ``bool``
+'Convenience type to represent either a single path or an iterable list of paths'
 FilePredicate = Callable[[Path], bool]
+'Type for predicate functions that accept a file path and return a `bool`'
 
 _FS_OPS_POOL = ThreadPoolExecutor(4)
 
@@ -52,6 +55,8 @@ else:
 
     class _ExecutorMappedOperation(Generic[_FuncT, T]):
         def __init__(self, sync_func: _FuncT, executor: Executor) -> None:
+            self.__name__ = sync_func.__name__
+            self.__doc__ = sync_func.__doc__
             self._sync = sync_func
             self._exec = executor
 
@@ -60,11 +65,16 @@ else:
 
         def __call__(self, *args: Any, **kwargs: Any) -> Awaitable[T]:
             loop = asyncio.get_running_loop()
-            return loop.run_in_executor(self._exec, lambda: self.sync(*args, **kwargs))
+            cancel = CancellationToken.get_context_local()
+            return loop.run_in_executor(self._exec, lambda: self.sync(*args, **kwargs, cancel=cancel))
 
 
 def _thread_pooled(fn: Callable[_Params, T]) -> _ExecutorMappedOperation[_Params, T]:
-    return _ExecutorMappedOperation[_Params, T](fn, _FS_OPS_POOL)
+    if __sphinx_build__:
+        return cast(Any, fn)
+    r = _ExecutorMappedOperation[_Params, T](fn, _FS_OPS_POOL)
+    functools.update_wrapper(r, fn)
+    return r
 
 
 def iter_pathish(p: NPaths, *, type: Type[_PathT] = Path) -> Iterable[_PathT]:
@@ -371,11 +381,11 @@ def safe_move_file(source: Pathish,
                    if_exists: IfExists = 'fail',
                    cancel: CancellationToken | None = None) -> Path:
     """
-    Move the given file from one location to another. If the system's cannot simple move
-    the file, it will be copied and the source will be removed.
+    Move the given file from one location to another. If the system cannot
+    simply move the file, it will be copied and the source will be removed.
 
     :param source: The source file which will be moved.
-    :param dest: The destination of the move operations.
+    :param dest: The destination of the move operation.
     :param mkdirs: If ``True``, the directory containing ``dest`` will be created if absent.
     :param on_exists: What to do if the destination already exists.
     :param cancel: A cancellation token for the operation.
