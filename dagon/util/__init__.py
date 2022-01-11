@@ -6,12 +6,13 @@ General utilities
 """
 from __future__ import annotations
 
-import difflib
 import contextvars
+import difflib
+import sqlite3
 import types
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from typing import (TYPE_CHECKING, Any, AsyncContextManager, Awaitable, Callable, ContextManager, Generator, Generic,
-                    Iterable, Type, TypeVar, cast, overload)
+                    Iterable, Iterator, Type, TypeVar, cast, overload)
 
 from typing_extensions import Protocol
 
@@ -225,3 +226,33 @@ def ensure_awaitable(val: Awaitable[T] | T) -> Awaitable[T]:
     if isinstance(val, Awaitable):
         return cast(Awaitable[T], val)
     return ReadyAwaitable(val)
+
+
+@contextmanager
+def recursive_transaction(db: sqlite3.Connection) -> Iterator[None]:
+    """
+    Create a scoped "recursive" transaction on the given SQLite database
+    connection.
+
+    If the database is already in a transaction, this context manager is a no-op
+    on entry and exit. Otherwise, creates a transaction that is COMMITed on
+    exit, or ROLLedBACK if the scope exists via exception.
+
+    asserts that no one closed the transaction outside of our watch.
+    """
+    if db.in_transaction:
+        try:
+            yield
+        finally:
+            assert db.in_transaction, 'transaction was ended prematurely'
+        return
+    db.execute('BEGIN')
+    try:
+        yield
+    except:
+        assert db.in_transaction, 'transaction was ended prematurely'
+        db.execute('ROLLBACK')
+        raise
+    else:
+        assert db.in_transaction, 'transaction was ended prematurely'
+        db.execute('COMMIT')
