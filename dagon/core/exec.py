@@ -51,7 +51,7 @@ class SimpleExecutor(Generic[NodeT]):
 
     .. note::
         It is safe to add additional nodes and edges to the graph while it is
-        being executed, except for addition inbound edges to finished/running
+        being executed, except for additional inbound edges to finished/running
         nodes, which is forbidden by `.LowLevelDAG.add` and guarded with an
         exception.
     """
@@ -204,11 +204,11 @@ class SimpleExecutor(Generic[NodeT]):
             self.__graph.mark_finished(res.task)
             ret.add(res)
 
-        if not self.__any_failed:
+        if not self.any_failed:
             # Check if any of the executions represents a failure
             self.__any_failed = any((not isinstance(r.result, Success)) for r in ret)
 
-        if not self.has_pending_work or (self.__any_failed and not self.has_running_work):
+        if not self.has_pending_work or (self.any_failed and not self.has_running_work):
             self.__finished = True
             await self.on_finish()
 
@@ -281,13 +281,13 @@ class SimpleExecutor(Generic[NodeT]):
         return self._run_and_record(node)
 
     async def _run_and_record(self, node: NodeT) -> NodeResult[NodeT]:
-        # Run the task and capture all results
+        "Run the task and capture all results"
         resdat = await self._run_noraise(node)
         self.__futures[node].set_result(resdat)
         return resdat
 
     async def _run_noraise(self, node: NodeT) -> NodeResult[NodeT]:
-        # Run the task in a way that captures all exceptions
+        "Run the task in a way that captures all exceptions"
         try:
             retval = await ensure_awaitable(self.__exec_fn(node))
             # A successful execution with no errors. Capture the return value:

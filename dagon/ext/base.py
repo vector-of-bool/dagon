@@ -1,15 +1,21 @@
 import argparse
 from contextlib import nullcontext
-from typing import (TYPE_CHECKING, AsyncContextManager, ClassVar, ContextManager, Generic, Sequence, cast)
+from typing import (TYPE_CHECKING, AsyncContextManager, Awaitable, ClassVar, ContextManager, Generic, Sequence, cast)
+from dagon.core.result import NodeResult
 
 from dagon.task.dag import OpaqueTask
-from dagon.util import AsyncNullContext, typecheck
+from dagon.util import AsyncNullContext, ReadyAwaitable, typecheck
 
 from .iface import AppDataT, GlobalDataT, IExtension, OpaqueTaskGraphView, TaskDataT
 from .loader import ext_app_data, ext_global_data, ext_task_data
 
 
 class BaseExtension(Generic[AppDataT, GlobalDataT, TaskDataT]):
+    """
+    Common base class for extensions, with reasonable defaults for all operations
+
+    .. seealso:: `.IExtension`
+    """
     dagon_ext_name: str
     dagon_ext_requires: ClassVar[Sequence[str]] = ()
     dagon_ext_requires_opt: ClassVar[Sequence[str]] = ()
@@ -40,6 +46,9 @@ class BaseExtension(Generic[AppDataT, GlobalDataT, TaskDataT]):
     @classmethod
     def task_data(cls) -> TaskDataT:
         return ext_task_data(cls.dagon_ext_name)
+
+    def notify_result(self, result: NodeResult[OpaqueTask]) -> Awaitable[None]:
+        return ReadyAwaitable(None)
 
 
 if TYPE_CHECKING:
