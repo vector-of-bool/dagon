@@ -17,10 +17,6 @@ def get_argparser(exts: ExtLoader) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('tasks', nargs='*', help='Tasks to execute')
     parser.add_argument('-lt', '--list-tasks', action='store_true')
-    parser.add_argument('--generate-timeline',
-                        '-GT',
-                        help='Generate a timeline HTML file (dagon-timeline.html)',
-                        action='store_true')
     parser.add_argument('--no-doc', action='store_true', help='Do not print docstrings when listing tasks/options')
     parser.add_argument('-j', '--jobs', type=int, help='Maximum number of parallel jobs to run')
     parser.add_argument('--eager-fail-stop',
