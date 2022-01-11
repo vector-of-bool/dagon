@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from dagon.option import add_option, value_of
-
-from dagon import task
+import enum
+from dagon import task, option
+from dagon.util import unused
 from tests.test_util import dag_test
+
+
+class MyEnum(enum.Enum):
+    Foo = 'foo'
+    Bar = 'bar'
 
 
 @dag_test(['foo'])
@@ -12,23 +17,40 @@ def test_simple():
     async def foo():
         pass
 
+    unused(foo)
+
 
 @dag_test(['-ofoo=51'])
 def test_opts():
-    opt = add_option('foo', int)
+    opt = option.add('foo', int)
 
     @task.define(default=True)
     async def meow():
-        assert value_of(opt) == 51
+        assert opt.get() == 51
+
+    unused(meow)
 
 
 @dag_test([])
 def test_opt_default():
-    opt = add_option('foo', int)
+    opt = option.add('foo', int)
 
     @task.define(default=True)
     async def meow():
-        assert value_of(opt) == None
+        assert opt.get() == None
+
+    unused(meow)
+
+
+@dag_test(['-oval=foo'])
+def test_opt_enum():
+    opt = option.add('val', MyEnum)
+
+    @task.define(default=True)
+    async def meow():
+        assert opt.get() is MyEnum.Foo
+
+    unused(meow)
 
 
 @dag_test([])
@@ -50,3 +72,5 @@ def test_large_graph():
     @task.define(default=True, depends=names)
     async def fin() -> None:
         print('final')
+
+    unused(fin)

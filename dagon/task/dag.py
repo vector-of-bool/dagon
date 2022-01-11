@@ -8,7 +8,7 @@ from typing import (Any, Awaitable, Callable, Iterable, Iterator, NamedTuple, Ty
 from dagon.core import exec
 from dagon.core.ll_dag import LowLevelDAG
 from dagon.core.result import NodeResult, Success
-from dagon.util import NoneSuch, Opaque, first, nearest_matching
+from dagon.util import NoneSuch, Opaque, first, nearest_matching, scope_set_contextvar
 
 from .task import DisabledTaskError, InvalidTask, Task
 
@@ -166,6 +166,10 @@ async def _await_result(ares: Awaitable[NodeResult[Any]], name: str) -> Any:
 
 
 class TaskExecutor(exec.SimpleExecutor[Task[T]]):
+    """
+    A DAG executor that executes task objects and allows the results of tasks
+    to be shared between each other using the `.result_of` function.
+    """
     def __init__(self, graph: LowLevelDAG[Task[T]], exec_fn: Callable[[Task[T]], Awaitable[T]]):
         super().__init__(graph, exec_fn)
         self.__graph = graph
@@ -176,12 +180,13 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
         return self.__graph
 
     async def do_run_node(self, node: Task[T]) -> NodeResult[Task[T]]:
-        tok = _CTX_EXEC.set(_ExecCtx(self, node))
-        try:
-            result = await self.do_run_task(node)
-        finally:
-            _CTX_EXEC.reset(tok)
-        return result
+        """
+        Overridden from `SimpleExecutor.do_run_node`. Sets up the context to
+        allow result sharing between tasks. Calls `.do_run_task` to execute
+        the task within the scope that allows for result sharing.
+        """
+        with scope_set_contextvar(_CTX_EXEC, _ExecCtx(self, node)):
+            return await self.do_run_task(node)
 
     async def do_run_task(self, node: Task[T]) -> NodeResult[Task[T]]:
         return await super().do_run_node(node)

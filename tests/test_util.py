@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import pytest
 from contextlib import ExitStack
 from typing import Callable, Sequence
 
@@ -13,6 +14,7 @@ NullaryFn = Callable[[], None]
 def dag_test(argv: Sequence[str] = (), tasks: Sequence[str] | None = None) -> Callable[[NullaryFn], NullaryFn]:
     def decorate(test_fn: NullaryFn) -> NullaryFn:
         @functools.wraps(test_fn)
+        @pytest.mark.asyncio
         def test_with_dag():
             dag = TaskDAG('<test>')
             exts = main.get_extensions()
