@@ -16,11 +16,11 @@ async def _read_file(store: mod.IFileStorage, name: Pathish) -> bytes:
 class CaseSet_IFileStorage:
     @pytest.fixture
     @pytest.mark.asyncio
-    async def store(self) -> AsyncGenerator[mod.IFileStorage, None]:
-        async with self.do_create_storage() as f:
+    async def store(self, tmp_path: Path) -> AsyncGenerator[mod.IFileStorage, None]:
+        async with self.do_create_storage(tmp_path) as f:
             yield f
 
-    def do_create_storage(self) -> AsyncContextManager[mod.IFileStorage]:
+    def do_create_storage(self, tmp_path: Path) -> AsyncContextManager[mod.IFileStorage]:
         raise NotImplementedError
 
     @pytest.mark.asyncio
@@ -84,7 +84,7 @@ class CaseSet_IFileStorage:
 
 
 class TestDatabaseFileStorage(CaseSet_IFileStorage):
-    def do_create_storage(self) -> AsyncContextManager[mod.IFileStorage]:
+    def do_create_storage(self, tmp_path: Path) -> AsyncContextManager[mod.IFileStorage]:
         db = Database.get_or_create(':memory:')
         return mod.open_db_storage(db=db, run_id=db.new_run_id())
 
@@ -96,7 +96,7 @@ class TestDatabaseFileStorage(CaseSet_IFileStorage):
 
 class TestNativeFileStorage(CaseSet_IFileStorage):
     @asynccontextmanager
-    async def do_create_storage(self) -> AsyncIterator[mod.IFileStorage]:
-        nfs = mod.NativeFileStorage('test-files')
+    async def do_create_storage(self, tmp_path: Path) -> AsyncIterator[mod.IFileStorage]:
+        nfs = mod.NativeFileStorage(tmp_path)
         await fs.remove(nfs.path, recurse=True, absent_ok=True)
         yield nfs
