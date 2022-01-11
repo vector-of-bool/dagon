@@ -1,5 +1,4 @@
 import argparse
-import os
 from typing import Sequence
 
 from dagon.ext.loader import ExtLoader
@@ -18,11 +17,6 @@ def get_argparser(exts: ExtLoader) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('tasks', nargs='*', help='Tasks to execute')
     parser.add_argument('-lt', '--list-tasks', action='store_true')
-    parser.add_argument('--fake', action='store_true', help='Do not execute any tasks, only pretend.')
-    parser.add_argument('--database-path',
-                        '-db',
-                        help='Path to the database file to use. Defaults to `.dagon.db`',
-                        default=os.environ.get('DAGON_DATABASE_PATH', '.dagon.db'))
     parser.add_argument('--generate-timeline',
                         '-GT',
                         help='Generate a timeline HTML file (dagon-timeline.html)',
