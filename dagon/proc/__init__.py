@@ -21,6 +21,7 @@ from typing_extensions import Literal, Protocol
 
 from ..event.cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from ..fs import Pathish
+from .. import db as db_mod
 from ..task import Dependency, DependsArg, Task, TaskDAG, current_dag
 
 _AioProcess = asyncio.subprocess.Process
@@ -314,13 +315,13 @@ def get_effective_env(env: Mapping[str, str] | None, *, merge: bool = True) -> d
     return final_env
 
 
-def _record_proc(ctx: TaskContext, cmd: Sequence[str], start_time: datetime.datetime, cwd: Path,
-                 result: ProcessResult) -> None:
-    iv = ctx.db.new_interval(ctx.task_run_id, f'Subprocess {cmd}', start_time)
+def _record_proc(db: db_mod.Database, task_run_id: db_mod.TaskRunID, cmd: Sequence[str], start_time: datetime.datetime,
+                 cwd: Path, result: ProcessResult) -> None:
+    iv = db.new_interval(task_run_id, f'Subprocess {cmd}', start_time)
     end_time = datetime.datetime.now()
     dur = end_time - start_time
-    pid = ctx.db.store_proc_execution(
-        ctx.task_run_id,
+    pid = db.store_proc_execution(
+        task_run_id,
         cmd=cmd,
         cwd=cwd,
         stdout=result.stdout,
@@ -330,16 +331,17 @@ def _record_proc(ctx: TaskContext, cmd: Sequence[str], start_time: datetime.date
         duration=dur.total_seconds(),
     )
     meta = {'process_id': pid}
-    ctx.db.set_interval_meta(iv, meta)
-    ctx.db.set_interval_end(iv, end_time)
+    db.set_interval_meta(iv, meta)
+    db.set_interval_end(iv, end_time)
 
 
 def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool, result: ProcessResult,
                proc: RunningProcess, next_handler: ProcessCompletionCallback) -> None:
-    ctx = None
-    if ctx and record:
+    gctx = db_mod.global_context_data()
+    tctx = db_mod.task_context_data()
+    if record and gctx and tctx:
         # Store this process execution in the database
-        _record_proc(ctx, cmd, start_time, cwd, result)
+        _record_proc(gctx.database, tctx.task_run_id, cmd, start_time, cwd, result)
     next_handler(proc, result)
 
 
