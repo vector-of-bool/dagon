@@ -1,9 +1,13 @@
 import itertools
+from contextlib import ExitStack
+from typing import Any, Callable, Coroutine
 
 import dagon.task as mod
+from dagon.ext.exec import ExtAwareExecutor
+from dagon.tool import main
 from dagon.util.testing import async_test
 
-from ..core.result import NodeResult, Success
+from ..core.result import Failure, NodeResult, Success
 from .dag import TaskDAG, result_of
 
 # pyright: reportUnusedFunction=false
@@ -102,12 +106,16 @@ async def test_order_only() -> None:
         await _run_oo_test(use_oo_deps)
 
 
-# def run_test_on_fun(fn: Callable[[], Coroutine[None, None, None]], **kw: Any) -> None:
-#     t = mod.task_from_function(fn, **kw)
-#     dag = TaskDAG('Test')
-#     dag.add_task(t)
-#     plan = dag.mark([t.name])
-#     fails = dag.run_until_complete(plan, ExecutionOptions())
-#     for f in fails:
-#         assert f.exception is not None
-#         raise f.exception
+def run_test_on_fun(fn: Callable[[], Coroutine[None, None, None]], **kw: Any) -> None:
+    with ExitStack() as st:
+        exts = main.get_extensions()
+        st.enter_context(exts.app_context())
+        t = mod.task_from_function(fn, **kw)
+        dag = TaskDAG('Test')
+        dag.add_task(t)
+        graph = dag.low_level_graph([t.name])
+        results = ExtAwareExecutor(exts, graph).run_all_until_complete()
+        for f in results:
+            if isinstance(f.result, Failure):
+                f.result.reraise()
+            assert isinstance(f.result, Success)
