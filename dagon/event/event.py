@@ -93,6 +93,11 @@ class EventMap:
         """Determine whether there is an event `name`"""
         return name in self._events
 
+    def clone(self) -> EventMap:
+        e = EventMap()
+        e._events = e._events.copy()
+        return e
+
     def register(self, name: str, event: Event[T]) -> Event[T]:
         """
         Register a new `event` in the map with `name`. If `name` is already

@@ -29,7 +29,7 @@ strict = ["**"]
 typeshed-path = "typings"
 
 [tool.poetry.plugins."dagon.extensions"]
-"dagon.events" = "dagon.event.ext:_EventsExt"
+"dagon.events" = "dagon.event:_EventsExt"
 "dagon.options" = "dagon.option.ext:_OptionsExt"
 "dagon.pools" = "dagon.pool:_PoolsExt"
 
