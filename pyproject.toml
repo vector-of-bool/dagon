@@ -32,6 +32,8 @@ typeshed-path = "typings"
 "dagon.events" = "dagon.event:_EventsExt"
 "dagon.options" = "dagon.option.ext:_OptionsExt"
 "dagon.pools" = "dagon.pool:_PoolsExt"
+"dagon.db" = "dagon.db:_DatabaseExt"
+"dagon.persist" = "dagon.persist:_PersistExt"
 
 [tool.pytest.ini_options]
 filterwarnings = [
