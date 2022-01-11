@@ -7,17 +7,17 @@ Module for performing filesystem operations
 
 from __future__ import annotations
 
-import functools
 import asyncio
 import errno
+import functools
 import itertools
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor, Executor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from io import BufferedIOBase
 from pathlib import Path, PurePath
-from typing import (TYPE_CHECKING, Any, AsyncIterable, AsyncIterator, Awaitable, Callable, Generic, Iterable, Mapping,
-                    Type, TypeVar, Union, cast)
+from typing import (TYPE_CHECKING, Any, AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Callable, Generic,
+                    Iterable, Mapping, Type, TypeVar, Union, cast)
 
 from typing_extensions import Literal, ParamSpec
 
@@ -418,3 +418,19 @@ def safe_move_file(source: Pathish,
             source.unlink()
             return dest
         raise
+
+
+def open_file_writer(fpath: Pathish, if_exists: IfExists = 'fail'):
+    """
+    Opens a native file as an `~IFileWriter`.
+    """
+    from ..storage import NativeFileStorage
+    return NativeFileStorage('/').open_file_writer(fpath, if_exists=if_exists)
+
+
+def read_file(fpath: Pathish) -> AsyncContextManager[AsyncIterable[bytes]]:
+    """
+    Opens a native file as an asyncronous byte iterable.
+    """
+    from ..storage import NativeFileStorage
+    return NativeFileStorage('/').read_file(fpath)

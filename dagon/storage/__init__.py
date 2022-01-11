@@ -271,7 +271,6 @@ class NativeFileStorage:
 
 
 if TYPE_CHECKING:
-    # pylint: disable=not-callable
     util.typecheck(IFileStorage)(_DatabaseFileStorage)
     util.typecheck(IFileWriter)(_DatabaseFileWriter)
     util.typecheck(IFileStorage)(NativeFileStorage)
@@ -365,3 +364,8 @@ async def recover_iter(fpath: Pathish, *, from_: IFileStorage | None = None) -> 
         bufs = await st.enter_async_context(from_.read_file(fpath))
         async for b in bufs:
             yield b
+
+
+if TYPE_CHECKING:
+    f: IFileStorage = fs
+    util.unused(f)
