@@ -34,6 +34,11 @@ typeshed-path = "typings"
 "dagon.pools" = "dagon.pool:_PoolsExt"
 "dagon.db" = "dagon.db:_DatabaseExt"
 "dagon.persist" = "dagon.persist:_PersistExt"
+"dagon.ui" = "dagon.ui:_Ext"
+
+[tool.poetry.plugins."dagon.uis"]
+"dagon.ui.simple" = "dagon.ui.simple:SimpleUI"
+"dagon.ui.fancy" = "dagon.ui.fancy:FancyUI"
 
 [tool.pytest.ini_options]
 filterwarnings = [

@@ -274,7 +274,7 @@ class ExtLoader:
         try:
             inst: Any = cls()
         except BaseException as e:
-            warnings.warn(f'Instantiating/calling extension loader [{cls!r}] resulted in an exception',
+            warnings.warn(f'Instantiating/calling extension loader [{cls!r}] resulted in an exception: {e}',
                           ExtensionLoadWarning,
                           source=e)
             return

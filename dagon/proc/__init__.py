@@ -21,7 +21,7 @@ from typing_extensions import Literal, Protocol
 
 from ..event.cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from ..fs import Pathish
-from .. import db as db_mod
+from .. import db as db_mod, ui
 from ..task import Dependency, DependsArg, Task, TaskDAG, current_dag
 
 _AioProcess = asyncio.subprocess.Process
@@ -335,13 +335,15 @@ def _record_proc(db: db_mod.Database, task_run_id: db_mod.TaskRunID, cmd: Sequen
     db.set_interval_end(iv, end_time)
 
 
-def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool, result: ProcessResult,
-               proc: RunningProcess, next_handler: ProcessCompletionCallback) -> None:
+def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool, echo_on_done: bool,
+               result: ProcessResult, proc: RunningProcess, next_handler: ProcessCompletionCallback) -> None:
     gctx = db_mod.global_context_data()
     tctx = db_mod.task_context_data()
     if record and gctx and tctx:
         # Store this process execution in the database
         _record_proc(gctx.database, tctx.task_run_id, cmd, start_time, cwd, result)
+    if echo_on_done:
+        ui.process_done(ui.ProcessResultUIInfo(cmd, result.retcode, result.stdout, result.stderr))
     next_handler(proc, result)
 
 
@@ -353,6 +355,7 @@ async def spawn(cmd: CommandLine,
                 stdin_pipe: bool = False,
                 on_line: LineHandler | None = None,
                 on_done: ProcessCompletionCallback | None = None,
+                echo_on_done: bool = True,
                 record: bool = True,
                 cancel: CancellationToken | None = None,
                 timeout: datetime.timedelta | None = None) -> RunningProcess:
@@ -394,6 +397,8 @@ async def spawn(cmd: CommandLine,
                         'a string as the command. Commands are not '
                         'strings! Pass a list of command line arguments '
                         'instead. NOTE: Shell-isms are NOT supported.')
+    # Get the cancellation token that may be in the task context
+    cancel = CancellationToken.resolve(cancel)
     raise_if_cancelled(cancel)
     # Flatten the command line
     cmd_plain = plain_commandline(cmd)
@@ -402,8 +407,6 @@ async def spawn(cmd: CommandLine,
     # Get the subprocess environment
     env = get_effective_env(env, merge=merge_env)
     loop = asyncio.get_event_loop()
-    # Get the cancellation token that may be in the task context
-    cancel = cancel or CancellationToken.get_context_local()
     preexec_fn = None
     might_cancel = cancel is not None or timeout is not None
     if might_cancel and os.name != 'nt':
@@ -421,7 +424,7 @@ async def spawn(cmd: CommandLine,
     start_time = datetime.datetime.now()
     cwd_ = cwd
     # Call _proc_done when the process completes
-    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, record, p1, p0, prev_on_done)
+    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, record, echo_on_done, p1, p0, prev_on_done)
 
     # Spawn that subprocess!
     proc = await asyncio.create_subprocess_exec(
@@ -457,16 +460,15 @@ class UpdateStatus:
         self._prefix = prefix
 
     def __call__(self, line: bytes) -> None:
-        from dagon import ui
         ui.status(self._prefix + ' ' + line.decode(errors='?'))
 
 
-class LogLine:
+class _LogLine:
     def __call__(self, line: bytes) -> None:
-        print(line.decode(errors='?'), end='', flush=True)
-        return
-        from dagon import ui
         ui.print(line.decode(errors='?'))
+
+
+LOG_LINE: LineHandler = _LogLine()
 
 
 async def run(cmd: CommandLine,
@@ -478,6 +480,7 @@ async def run(cmd: CommandLine,
               check: bool = True,
               on_line: LineHandler | None = None,
               on_done: ProcessCompletionCallback | None = None,
+              echo_on_done: bool = True,
               record: bool = True,
               cancel: CancellationToken | None = None,
               timeout: datetime.timedelta | None = None) -> ProcessResult:
@@ -503,6 +506,7 @@ async def run(cmd: CommandLine,
         stdin_pipe=stdin is not None,
         on_line=on_line,
         on_done=on_done,
+        echo_on_done=echo_on_done,
         record=record,
         cancel=cancel,
         timeout=timeout,
@@ -536,6 +540,7 @@ def define_cmd_task(name: str,
                     cwd: Pathish | None = None,
                     doc: str = '',
                     output: OutputMode = 'accumulate',
+                    echo_on_done: bool | None = None,
                     check: bool = True,
                     default: bool = False,
                     depends: DependsArg = (),
@@ -552,20 +557,22 @@ def define_cmd_task(name: str,
     assert cmd, '`cmd` must not be empty for declare_cmd_task'
 
     async def _command_runner() -> ProcessResult:
-        handler: LineHandler
+        on_line: LineHandler
         if output in ('silent', 'accumulate'):
-            handler = lambda b: None
+            on_line = lambda b: None
         elif output == 'live':
-            handler = LogLine()
+            on_line = LOG_LINE
         else:
             assert output == 'status', f'Invalid output={output!r}"'
-            handler = UpdateStatus('')
+            on_line = UpdateStatus('')
+
         return await run(
             cmd,
             cwd=cwd,
             check=check,
             env=env,
-            on_line=handler,
+            on_line=on_line,
+            echo_on_done=output != 'silent' if echo_on_done is None else echo_on_done,
         )
 
     dag = dag or current_dag()

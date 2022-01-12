@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import itertools
-from contextlib import contextmanager
-from typing import (Any, Awaitable, Callable, Iterable, Iterator, NamedTuple, TypeVar, cast, overload)
+import os
+import signal
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
+from types import FrameType
+from typing import (TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, NamedTuple, Sequence,
+                    TypeVar, cast, overload)
 
-from dagon.core import exec
-from dagon.core.ll_dag import LowLevelDAG
-from dagon.core.result import NodeResult, Success
-from dagon.util import NoneSuch, Opaque, first, nearest_matching, scope_set_contextvar
-
+from ..core import LowLevelDAG, NodeResult, Success, exec
+from ..util import (NoneSuch, Opaque, first, nearest_matching, scope_set_contextvar)
 from .task import DisabledTaskError, InvalidTask, Task
+
+if TYPE_CHECKING:
+    from dagon.event.cancel import CancellationToken
 
 T = TypeVar('T')
 
@@ -100,7 +105,7 @@ class TaskDAG:
                         *,
                         exec_fn: Callable[[Task[T]], Awaitable[T]] = default_execute) -> exec.SimpleExecutor[Task[Any]]:
         graph = self.low_level_graph(marks)
-        return TaskExecutor[Opaque](graph, exec_fn=exec_fn)
+        return TaskExecutor[Opaque](graph, exec_fn=exec_fn, catch_signals=True)
 
     async def execute(self,
                       marks: Iterable[str],
@@ -170,14 +175,47 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
     A DAG executor that executes task objects and allows the results of tasks
     to be shared between each other using the `.result_of` function.
     """
-    def __init__(self, graph: LowLevelDAG[Task[T]], exec_fn: Callable[[Task[T]], Awaitable[T]]):
+    def __init__(self, graph: LowLevelDAG[Task[T]], exec_fn: Callable[[Task[T]], Awaitable[T]], catch_signals: bool):
         super().__init__(graph, exec_fn)
         self.__graph = graph
+        self.__catch_signals = catch_signals
 
     @property
     def graph(self):
         """The low-level graph executed by this executor"""
         return self.__graph
+
+    @asynccontextmanager
+    async def running_context(self) -> AsyncIterator[None]:
+        from dagon.event.cancel import CancellationToken
+        async with AsyncExitStack() as st:
+            await st.enter_async_context(super().running_context())
+            tok = CancellationToken.get_context_local()
+            if tok is None:
+                tok = CancellationToken()
+                tok.set_context_local(tok)
+                st.callback(lambda: tok.set_context_local(None))
+            handle_signals: list[int] = []
+            if self.__catch_signals:
+                handle_signals.extend((signal.SIGINT, signal.SIGTERM, signal.SIGQUIT))
+                if os.name == 'nt':
+                    handle_signals.append(signal.SIGBREAK)
+            st.enter_context(self._handle_signals(handle_signals, tok))
+            yield
+
+    @contextmanager
+    def _handle_signals(self, sigs: Sequence[int], cancel: CancellationToken) -> Iterator[None]:
+        loop = asyncio.get_event_loop()
+        prev_handlers = [signal.signal(n, lambda n, fr: self._do_stop_threadsafe(n, fr, cancel, loop)) for n in sigs]
+        try:
+            yield
+        finally:
+            for sig, prev in zip(sigs, prev_handlers):
+                signal.signal(sig, prev)
+
+    def _do_stop_threadsafe(self, _signum: int, _frame: None | FrameType, cancel: CancellationToken,
+                            loop: asyncio.AbstractEventLoop) -> None:
+        loop.call_soon_threadsafe(cancel.cancel)
 
     async def do_run_node(self, node: Task[T]) -> NodeResult[Task[T]]:
         """

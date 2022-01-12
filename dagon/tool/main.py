@@ -101,7 +101,7 @@ def run_with_args(dag: TaskDAG, exts: ExtLoader, args: ParsedArgs, default_tasks
             print(f'No such task "{e.key}".', file=sys.stderr)
         return 1
 
-    exe = ExtAwareExecutor(exts, ll_dag)
+    exe = ExtAwareExecutor(exts, ll_dag, catch_signals=True)
 
     results = exe.run_all_until_complete()
     failed = False

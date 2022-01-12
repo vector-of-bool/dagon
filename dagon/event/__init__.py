@@ -30,11 +30,10 @@ from __future__ import annotations
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Callable, Iterator
 
-from dagon.ext.base import BaseExtension
-from dagon.ext.iface import OpaqueTaskGraphView
-from dagon.task.dag import OpaqueTask
-from dagon.util import T
-
+from ..ext.base import BaseExtension
+from ..ext.iface import OpaqueTaskGraphView
+from ..task.dag import OpaqueTask
+from ..util import T
 from .cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from .event import ConnectionToken, Event, EventMap
 
@@ -59,7 +58,8 @@ class _EventsExt(BaseExtension[None, EventMap, EventMap]):
     @asynccontextmanager
     async def global_context(self, graph: OpaqueTaskGraphView) -> AsyncIterator[EventMap]:
         map = EventMap()
-        yield map
+        with CancellationToken.ensure_context_local():
+            yield map
 
     @asynccontextmanager
     async def task_context(self, task: OpaqueTask) -> AsyncIterator[EventMap]:
@@ -67,8 +67,7 @@ class _EventsExt(BaseExtension[None, EventMap, EventMap]):
         map.register('dagon.interval-start', Event[str]())
         map.register('dagon.interval-end', Event[None]())
         map.register('dagon.mark', Event[None]())
-        with CancellationToken.scoped_context_local(CancellationToken()):
-            yield map
+        yield map
 
 
 class _EventsContextLookup:

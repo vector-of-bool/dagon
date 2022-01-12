@@ -4,7 +4,7 @@ import traceback
 import warnings
 from typing import Any, Callable, Dict, Generic, NamedTuple
 
-from dagon.util import T, unused
+from ..util import T, unused
 
 Handler = Callable[[T], Any]
 HandlerMap = Dict['ConnectionToken', Handler[T]]
@@ -74,8 +74,8 @@ class Event(Generic[T]):
             try:
                 h(value)
             except Exception:  # pylint: disable=broad-except
-                traceback.print_exc()
-                warnings.warn('An event handler function raised an exception. It has been ignored.')
+                tb = traceback.format_exc()
+                warnings.warn(f'An event handler function raised an exception. It has been ignored. {tb}')
 
 
 class EventMap:

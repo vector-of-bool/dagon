@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
 import contextvars
 import enum
+from contextlib import contextmanager
 from typing import Iterator, cast
 
 from .event import ConnectionToken, Event, Handler
@@ -91,9 +91,24 @@ class CancellationToken:
         """Get the context-local cancellation token (Possibly `None`)"""
         return CancellationToken._CTX_LOCAL.get()
 
+    @staticmethod
+    @contextmanager
+    def ensure_context_local() -> Iterator[CancellationToken]:
+        tok = CancellationToken.get_context_local()
+        if tok is None:
+            tok = CancellationToken()
+        with CancellationToken.scoped_context_local(tok):
+            yield tok
+
+    @classmethod
+    def resolve(cls, cancel: CancellationToken | None) -> CancellationToken | None:
+        if cancel is None:
+            return CancellationToken.get_context_local()
+        return cancel
+
     @classmethod
     @contextmanager
-    def scoped_context_local(cls, token: CancellationToken | None) -> Iterator[None]:
+    def scoped_context_local(cls, token: CancellationToken | None) -> Iterator[CancellationToken | None]:
         """
         Create a context manager that sets the context-local cancellation token
         to `token` for the duration of the context.
@@ -101,7 +116,7 @@ class CancellationToken:
         prev = cls.get_context_local()
         cls.set_context_local(token)
         try:
-            yield
+            yield token
         finally:
             cls.set_context_local(prev)
 

@@ -23,10 +23,5 @@ def get_argparser(exts: ExtLoader) -> argparse.ArgumentParser:
                         action='store_true',
                         help='Cancel running tasks immediately when a task fails')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--interface',
-                        '-ui',
-                        help='Set the user inferface kind',
-                        choices=['simple', 'fancy', 'auto', 'test'],
-                        default='auto')
     exts.add_options(parser)
     return parser

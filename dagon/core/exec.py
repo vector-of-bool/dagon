@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Any, Awaitable, Callable, Generic, cast
+from contextlib import AsyncExitStack
+from typing import Any, AsyncContextManager, Awaitable, Callable, Generic, cast
 
-from dagon.util import Opaque, ReadyAwaitable, ensure_awaitable
-
+from ..util import AsyncNullContext, Opaque, ensure_awaitable
 from .ll_dag import LowLevelDAG, NodeT
 from .result import Cancellation, ExceptionInfo, Failure, NodeResult, Success
 
@@ -45,9 +45,8 @@ class SimpleExecutor(Generic[NodeT]):
         to create a copy of the graph to give to the executor.
 
     This class can be derived from to customize an "hook" certain events. Refer
-    to the `.on_start`, `.on_finish`, and `.do_run_node` methods, which are
-    intended to be overridden for the purpose of intercepting certain graph
-    events.
+    to the `.running_scope`, and `.do_run_node` methods, which are intended to
+    be overridden for the purpose of intercepting certain graph events.
 
     .. note::
         It is safe to add additional nodes and edges to the graph while it is
@@ -77,9 +76,11 @@ class SimpleExecutor(Generic[NodeT]):
         self.__any_failed = False
         'Whether any nodes have failed'
         self.__started = False
-        'Whether we have called on_start'
-        self.__finished = False
         'Whether we have called on_finish'
+        self.__running_scope = AsyncExitStack()
+        'A context manager in scope while running the graph'
+        self.__finished = False
+        'Whether we have closed the running scope'
 
     @property
     def has_pending_work(self) -> bool:
@@ -169,7 +170,7 @@ class SimpleExecutor(Generic[NodeT]):
         """
         assert not self.finished, 'run_some() called on finished executor'
         if not self.__started and self.has_pending_work:
-            await self.on_start()
+            await self.__running_scope.enter_async_context(self.running_context())
             self.__started = True
 
         if not self.__any_failed:
@@ -210,7 +211,7 @@ class SimpleExecutor(Generic[NodeT]):
 
         if not self.has_pending_work or (self.any_failed and not self.has_running_work):
             self.__finished = True
-            await self.on_finish()
+            await self.__running_scope.aclose()
 
         return ret
 
@@ -238,28 +239,15 @@ class SimpleExecutor(Generic[NodeT]):
         """
         return self.loop.run_until_complete(self.run_some())
 
-    def on_start(self) -> Awaitable[None]:
+    def running_context(self) -> AsyncContextManager[None]:
         """
-        Method invoked when the first `.run_some` invocation is about to invoke
-        the first node. The return value of this method will be ``await``-ed
-        before continuing.
+        A context manager that is in scope while the graph is running, and
+        exited when the graph finishes execution.
 
         This method is a no-op by default. It is intended to be overridden by a
         derived class.
         """
-        return ReadyAwaitable(None)
-
-    def on_finish(self) -> Awaitable[None]:
-        """
-        Method invoked *once* before the final `.run_some` invocation returns
-        after the last result of the last task to execute returns. Whether the
-        tasks aren't enqueued because of an error, or if all tasks complete
-        successfully, this method will still be invoked.
-
-        This method is a no-op by default. It is intended to be overridden by a
-        derived class.
-        """
-        return ReadyAwaitable(None)
+        return AsyncNullContext()
 
     def do_run_node(self, node: NodeT) -> Awaitable[NodeResult[NodeT]]:
         """
