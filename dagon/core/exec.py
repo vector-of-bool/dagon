@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import AsyncExitStack
-from typing import Any, AsyncContextManager, Awaitable, Callable, Generic, cast
+from typing import TYPE_CHECKING, Any, AsyncContextManager, Awaitable, Callable, Generic, Mapping, cast
 
-from ..util import AsyncNullContext, Opaque, ensure_awaitable
+from ..util import AsyncNullContext, Opaque, ensure_awaitable, unused
 from .ll_dag import LowLevelDAG, NodeT
 from .result import Cancellation, ExceptionInfo, Failure, NodeResult, Success
 
@@ -136,7 +136,7 @@ class SimpleExecutor(Generic[NodeT]):
         """
         Enqueue all ready tasks in the associated task graph.
         """
-        nodes_to_start = [n for n in self.__graph.ready_nodes]
+        nodes_to_start = list(self.__graph.ready_nodes)
         new_tasks = set(self.loop.create_task(self.do_run_node(n)) for n in nodes_to_start)
         for n in nodes_to_start:
             self.__graph.mark_running(n)
@@ -145,7 +145,7 @@ class SimpleExecutor(Generic[NodeT]):
     async def run_some(self,
                        *,
                        interrupt: asyncio.Event | None = None,
-                       timeout: float | None = None) -> set[NodeResult[NodeT]]:
+                       timeout: float | None = None) -> Mapping[NodeT, NodeResult[NodeT]]:
         """
         Start pending nodes, and wait for one or more running nodes to finish,
         or until the `interrupt` `~asyncio.Event` is signaled, or `timeout` is
@@ -179,7 +179,7 @@ class SimpleExecutor(Generic[NodeT]):
 
         if not self.__running:
             # There is no work to run
-            return set()
+            return {}
 
         # Create a future waiting on any of the tasks
         tasks_fut = asyncio.ensure_future(asyncio.wait(self.__running, return_when=asyncio.FIRST_COMPLETED))
@@ -196,18 +196,18 @@ class SimpleExecutor(Generic[NodeT]):
 
         if tasks_fut not in done:
             # This occurs if we were signaled to return or if we hit our timeout
-            return set()
+            return {}
 
-        ret: set[NodeResult[NodeT]] = set()
+        ret: dict[NodeT, NodeResult[NodeT]] = {}
         done, self.__running = await tasks_fut
         for t in done:
             res = await t
             self.__graph.mark_finished(res.task)
-            ret.add(res)
+            ret[res.task] = res
 
         if not self.any_failed:
             # Check if any of the executions represents a failure
-            self.__any_failed = any((not isinstance(r.result, Success)) for r in ret)
+            self.__any_failed = any((not isinstance(r.result, Success)) for r in ret.values())
 
         if not self.has_pending_work or (self.any_failed and not self.has_running_work):
             self.__finished = True
@@ -215,25 +215,25 @@ class SimpleExecutor(Generic[NodeT]):
 
         return ret
 
-    async def run_all(self, *, interrupt: asyncio.Event | None = None) -> set[NodeResult[NodeT]]:
+    async def run_all(self, *, interrupt: asyncio.Event | None = None) -> Mapping[NodeT, NodeResult[NodeT]]:
         """
         Execute all nodes in the DAG until `.finished` is `True`, or until the
         `interrupt` `~asyncio.Event` is signaled.
 
         Returns a `set` of all `NodeResult` results.
         """
-        ret: set[NodeResult[NodeT]] = set()
+        ret: dict[NodeT, NodeResult[NodeT]] = {}
         while (not self.__any_failed and self.has_pending_work) or self.has_running_work:
-            ret |= await self.run_some(interrupt=interrupt)
+            ret.update(await self.run_some(interrupt=interrupt))
         return ret
 
-    def run_all_until_complete(self) -> set[NodeResult[NodeT]]:
+    def run_all_until_complete(self) -> Mapping[NodeT, NodeResult[NodeT]]:
         """
         Like `.run_all` but calls :func:`asyncio.run` with the coroutine.
         """
         return self.loop.run_until_complete(self.run_all())
 
-    def run_some_until_complete(self) -> set[NodeResult[NodeT]]:
+    def run_some_until_complete(self) -> Mapping[NodeT, NodeResult[NodeT]]:
         """
         Like `.run_some` but calls :func:`asyncio.run` with the coroutine.
         """
@@ -247,6 +247,8 @@ class SimpleExecutor(Generic[NodeT]):
         This method is a no-op by default. It is intended to be overridden by a
         derived class.
         """
+        if TYPE_CHECKING:
+            unused(self)
         return AsyncNullContext()
 
     def do_run_node(self, node: NodeT) -> Awaitable[NodeResult[NodeT]]:

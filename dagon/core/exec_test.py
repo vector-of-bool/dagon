@@ -31,14 +31,14 @@ def test_calc_lengths():
     res = exe.run_some_until_complete()
     assert exe.has_pending_work
     assert not exe.has_running_work
-    assert res == {
+    assert set(res.values()) == {
         NodeResult('foo', Success('foo')),
         NodeResult('bar', Success('bar')),
     }
     assert calc.strings['foo'] == 3
     assert calc.strings['bar'] == 3
     res = exe.run_some_until_complete()
-    assert res == {NodeResult('baz', Success('baz'))}
+    assert set(res.values()) == {NodeResult('baz', Success('baz'))}
     assert not exe.has_pending_work
     assert not exe.has_running_work
     assert not exe.any_failed
@@ -110,7 +110,7 @@ async def test_exec_interrupt():
     waiter.events['foo'].set()
     res = await asyncio.wait_for(exe.run_some(interrupt=interruptor), 1)
     assert graph.state_of('foo') == NodeState.Finished
-    assert res == {NodeResult('foo', Success('foo'))}
+    assert set(res.values()) == {NodeResult('foo', Success('foo'))}
     assert exe.has_pending_work
     assert not exe.has_running_work
     assert graph.state_of('bar') == NodeState.Pending
@@ -122,7 +122,7 @@ async def test_exec_interrupt():
     res = await asyncio.wait_for(exe.run_some(interrupt=interruptor), 1)
     assert not exe.has_pending_work
     assert not exe.has_running_work
-    assert res == {
+    assert set(res.values()) == {
         NodeResult('bar', Success('bar')),
         NodeResult('baz', Success('baz')),
     }

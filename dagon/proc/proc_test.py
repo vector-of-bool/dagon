@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+from typing import Iterable
 from ..event.cancel import CancellationToken
 import sys
 
@@ -8,18 +9,21 @@ import pytest
 from dagon import proc
 
 
+def _join_out(out: Iterable[proc.ProcessOutputItem]) -> bytes:
+    return b''.join(o.out for o in out)
+
+
 @pytest.mark.asyncio
 async def test_run_process_stdout():
     result = await proc.run([sys.executable, '-c', 'print("Hello!", end="")'])
-    assert result.stdout == b'Hello!'
+    assert _join_out(result.output) == b'Hello!'
 
 
 @pytest.mark.asyncio
 async def test_run_proc_fail():
     result = await proc.run([sys.executable, '-c', 'import sys; sys.exit(42)'], check=False)
     assert result.retcode == 42
-    assert result.stdout == b''
-    assert result.stderr == b''
+    assert _join_out(result.output) == b''
 
 
 @pytest.mark.asyncio
@@ -48,7 +52,7 @@ async def test_run_empty_stdin():
                             timeout=datetime.timedelta(seconds=1),
                             check=False)
     assert result.retcode == 0
-    assert result.stdout == b'\n'
+    assert _join_out(result.output) == b'\n'
 
 
 @pytest.mark.asyncio
@@ -59,23 +63,23 @@ async def test_run_simple_stdin():
         timeout=datetime.timedelta(seconds=1),
         check=False)
     assert result.retcode == 0
-    assert result.stdout == b'a:b:got: eggs bacon \n'
+    assert _join_out(result.output) == b'a:b:got: eggs bacon \n'
 
 
 @pytest.mark.asyncio
 async def test_output_handler():
     acc = ''
 
-    def handle(data: bytes):
+    def handle(data: proc.ProcessOutputItem):
         nonlocal acc
-        acc += data.decode()
+        acc += data.out.decode()
 
     res = await proc.run([sys.executable, '-c', 'import sys; sys.stdout.write("abc\\n")'], on_line=handle)
-    assert res.stdout == b'abc\n'
+    assert _join_out(res.output) == b'abc\n'
     assert acc == 'abc\n'
 
     acc = ''
 
     res = await proc.run([sys.executable, '-c', 'import sys; sys.stdout.write("abc")'], on_line=handle)
-    assert res.stdout == b'abc'
+    assert _join_out(res.output) == b'abc'
     assert acc == 'abc'

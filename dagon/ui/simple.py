@@ -1,3 +1,4 @@
+import asyncio
 import contextvars
 import time
 from contextlib import ExitStack, asynccontextmanager
@@ -6,7 +7,7 @@ from typing import IO, TYPE_CHECKING
 from dagon.ui import ansi
 
 from dagon.ui.events import UIEvents
-from dagon.ui.message import Message
+from dagon.ui.message import Message, MessageType
 from dagon.ui.proc import ProcessResultUIInfo, make_proc_info_box
 
 from .. import util
@@ -39,8 +40,9 @@ class SimpleUI:
             st.enter_context(util.scope_set_contextvar(_GLBL_CTX, _StdioAccum(cap)))
             start = time.time()
             print(f'[dagon]: {len(tuple(graph.all_nodes))} tasks to run')
-            st.enter_context(cap.on_out.connect(self._append_stdout))
-            st.enter_context(cap.on_err.connect(self._append_stderr))
+            loop = asyncio.get_event_loop()
+            st.enter_context(cap.on_out.connect(lambda s: loop.call_soon_threadsafe(lambda: self._append_stdout(s))))
+            st.enter_context(cap.on_err.connect(lambda s: loop.call_soon_threadsafe(lambda: self._append_stderr(s))))
             st.enter_context(events.message.connect(self._on_message))
             st.enter_context(events.status.connect(self._on_status))
             st.enter_context(events.process_done.connect(self._echo_proc))
@@ -56,15 +58,17 @@ class SimpleUI:
         print(f'[end:{task.name}]')
 
     def _on_message(self, msg: Message) -> None:
-        self._append_stdout(msg.content + '\n')
+        if msg.type != MessageType.Print:
+            self._append_stderr(msg.content + '\n')
+        else:
+            self._append_stdout(msg.content + '\n')
 
     def _on_status(self, status: str) -> None:
-        self._append_stdout(f'[status]{status}')
+        self._append_stdout(f'[status] {status}')
 
     def _echo_proc(self, result: ProcessResultUIInfo) -> None:
-        box = make_proc_info_box(result, max_width=ansi.get_term_width())
-        glb = _GLBL_CTX.get()
-        glb.capture.real_stdout.write(box + '\n')
+        for m in make_proc_info_box(result, max_width=ansi.get_term_width()):
+            self._on_message(m)
 
     def _append_stdout(self, s: str) -> None:
         ctx = _GLBL_CTX.get()

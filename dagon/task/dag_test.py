@@ -32,7 +32,7 @@ def test_simple() -> None:
     # Run the things
     results = dag.execute(['bar'])
     results = asyncio.run(results)
-    assert results == {
+    assert set(results.values()) == {
         NodeResult(t1, Success(None)),
         NodeResult(t2, Success(None)),
     }
@@ -55,7 +55,7 @@ def test_simple_with_result():
     dag.add_task(t1)
     dag.add_task(t2)
     results = asyncio.run(dag.execute(['bar']))
-    assert results == {
+    assert set(results.values()) == {
         NodeResult(t1, Success(2)),
         NodeResult(t2, Success(4)),
     }

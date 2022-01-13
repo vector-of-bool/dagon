@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import pytest
-import py.path
 
 from dagon import fs
 
@@ -10,39 +9,39 @@ async_test = pytest.mark.asyncio
 
 
 @async_test
-async def test_copy_file(tmpdir: py.path.local) -> None:
-    tmpdir.join('foo.txt').write_binary(b'hello')
-    await fs.copy_file(tmpdir / 'foo.txt', tmpdir / 'bar.txt')
-    assert tmpdir.join('bar.txt').read_binary() == b'hello'
+async def test_copy_file(tmp_path: Path) -> None:
+    tmp_path.joinpath('foo.txt').write_bytes(b'hello')
+    await fs.copy_file(tmp_path / 'foo.txt', tmp_path / 'bar.txt')
+    assert tmp_path.joinpath('bar.txt').read_bytes() == b'hello'
 
 
 @async_test
-async def test_copy_noexist_file(tmpdir: py.path.local) -> None:
+async def test_copy_noexist_file(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        await fs.copy_file(tmpdir.join('nope.txt'), 'nope.txt')
+        await fs.copy_file(tmp_path.joinpath('nope.txt'), 'nope.txt')
 
 
 @async_test
-async def test_copy_to_noexist_dir(tmpdir: py.path.local) -> None:
-    tmpdir.join('foo.txt').write_binary(b'hi')
-    tmpdir.join('bar.txt').write_binary(b'yo')
+async def test_copy_to_noexist_dir(tmp_path: Path) -> None:
+    tmp_path.joinpath('foo.txt').write_bytes(b'hi')
+    tmp_path.joinpath('bar.txt').write_bytes(b'yo')
     with pytest.raises(FileNotFoundError):
-        await fs.copy_file(tmpdir.join('foo.txt'), tmpdir.join('a/b'), mkdirs=False)
+        await fs.copy_file(tmp_path.joinpath('foo.txt'), tmp_path.joinpath('a/b'), mkdirs=False)
     with pytest.raises(NotADirectoryError):
-        await fs.copy_file(tmpdir.join('foo.txt'), tmpdir.join('bar.txt/b'), mkdirs=False)
+        await fs.copy_file(tmp_path.joinpath('foo.txt'), tmp_path.joinpath('bar.txt/b'), mkdirs=False)
     with pytest.raises(NotADirectoryError):
-        await fs.copy_file(tmpdir.join('foo.txt'), tmpdir.join('bar.txt/b'), mkdirs=True)
+        await fs.copy_file(tmp_path.joinpath('foo.txt'), tmp_path.joinpath('bar.txt/b'), mkdirs=True)
     # Okay: Creates the directory:
-    await fs.copy_file(tmpdir.join('foo.txt'), tmpdir.join('a/b'), mkdirs=True)
+    await fs.copy_file(tmp_path.joinpath('foo.txt'), tmp_path.joinpath('a/b'), mkdirs=True)
     with pytest.raises(IsADirectoryError):
-        await fs.copy_file(tmpdir.join('a'), tmpdir.join('b'))
+        await fs.copy_file(tmp_path.joinpath('a'), tmp_path.joinpath('b'))
 
 
 @async_test
-async def test_copy_file_is_dir(tmpdir: py.path.local) -> None:
-    tmpdir.join('foo.dir').mkdir()
+async def test_copy_file_is_dir(tmp_path: Path) -> None:
+    tmp_path.joinpath('foo.dir').mkdir()
     with pytest.raises(IsADirectoryError):
-        await fs.copy_file(tmpdir.join('foo.dir'), tmpdir.join('bar.dir'))
+        await fs.copy_file(tmp_path.joinpath('foo.dir'), tmp_path.joinpath('bar.dir'))
 
 
 def test_iter_pathish() -> None:
@@ -53,22 +52,22 @@ def test_iter_pathish() -> None:
 
 
 @async_test
-async def test_create_tree(tmpdir: py.path.local) -> None:
-    await fs.create_tree(tmpdir, {
+async def test_create_tree(tmp_path: Path) -> None:
+    await fs.create_tree(tmp_path, {
         'a.txt': b'Hello!',
         'b.txt': b'Goodbye!',
         'c': {
             'inner.txt': b'Howdy',
         },
     })
-    assert tmpdir.join('a.txt').read_binary() == b'Hello!'
-    assert tmpdir.join('b.txt').read_binary() == b'Goodbye!'
-    assert tmpdir.join('c/inner.txt').read_binary() == b'Howdy'
+    assert tmp_path.joinpath('a.txt').read_bytes() == b'Hello!'
+    assert tmp_path.joinpath('b.txt').read_bytes() == b'Goodbye!'
+    assert tmp_path.joinpath('c/inner.txt').read_bytes() == b'Howdy'
 
 
 @async_test
-async def test_copy_tree(tmpdir: py.path.local) -> None:
-    await fs.create_tree(tmpdir.join('base'), {
+async def test_copy_tree(tmp_path: Path) -> None:
+    await fs.create_tree(tmp_path.joinpath('base'), {
         'a': b'a',
         'b': b'b',
         'c': {
@@ -77,15 +76,15 @@ async def test_copy_tree(tmpdir: py.path.local) -> None:
             },
         },
     })
-    await fs.copy_tree(tmpdir / 'base', tmpdir / 'target')
-    assert tmpdir.join('base').isdir()  # Directory still exists
-    assert tmpdir.join('target').isdir()  # Directory was created
-    assert tmpdir.join('target/c/d/e').read_binary() == b'e'
+    await fs.copy_tree(tmp_path / 'base', tmp_path / 'target')
+    assert tmp_path.joinpath('base').is_dir()  # Directory still exists
+    assert tmp_path.joinpath('target').is_dir()  # Directory was created
+    assert tmp_path.joinpath('target/c/d/e').read_bytes() == b'e'
 
 
 @async_test
-async def test_dir_merge(tmpdir: py.path.local) -> None:
-    await fs.create_tree(tmpdir, {
+async def test_dir_merge(tmp_path: Path) -> None:
+    await fs.create_tree(tmp_path, {
         'a': {
             'file.a.txt': b'foo'
         },
@@ -93,12 +92,12 @@ async def test_dir_merge(tmpdir: py.path.local) -> None:
             'file.b.txt': b'bar'
         },
     })
-    await fs.copy_tree(tmpdir / 'a', tmpdir / 'c')
-    await fs.copy_tree(tmpdir / 'b', tmpdir / 'c', if_exists='merge')
-    assert tmpdir.join('c/file.a.txt').read_binary() == b'foo'
-    assert tmpdir.join('c/file.b.txt').read_binary() == b'bar'
-    tmpdir.join('a/file.a.txt').write_binary(b'baz')
-    await fs.copy_tree(tmpdir / 'a', tmpdir / 'c', if_file_exists='keep', if_exists='merge')
-    assert tmpdir.join('c/file.a.txt').read_binary() == b'foo'
-    await fs.copy_tree(tmpdir / 'a', tmpdir / 'c', if_file_exists='replace', if_exists='merge')
-    assert tmpdir.join('c/file.a.txt').read_binary() == b'baz'
+    await fs.copy_tree(tmp_path / 'a', tmp_path / 'c')
+    await fs.copy_tree(tmp_path / 'b', tmp_path / 'c', if_exists='merge')
+    assert tmp_path.joinpath('c/file.a.txt').read_bytes() == b'foo'
+    assert tmp_path.joinpath('c/file.b.txt').read_bytes() == b'bar'
+    tmp_path.joinpath('a/file.a.txt').write_bytes(b'baz')
+    await fs.copy_tree(tmp_path / 'a', tmp_path / 'c', if_file_exists='keep', if_exists='merge')
+    assert tmp_path.joinpath('c/file.a.txt').read_bytes() == b'foo'
+    await fs.copy_tree(tmp_path / 'a', tmp_path / 'c', if_file_exists='replace', if_exists='merge')
+    assert tmp_path.joinpath('c/file.a.txt').read_bytes() == b'baz'

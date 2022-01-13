@@ -17,11 +17,12 @@ from contextlib import ExitStack, asynccontextmanager, nullcontext
 from pathlib import Path, PurePath, PurePosixPath
 from typing import (Any, AsyncGenerator, AsyncIterator, ContextManager, Iterable, NamedTuple, NewType, Optional,
                     Sequence, Union, cast)
+from typing_extensions import Protocol
 
 from dagon.core.result import Cancellation, Failure, NodeResult, Success
 from dagon.ext.iface import OpaqueTaskGraphView
 from dagon.task.dag import OpaqueTask
-from typing_extensions import TypeAlias
+from typing_extensions import Literal, TypeAlias
 
 from .. import util
 from ..event import events
@@ -80,6 +81,11 @@ class IncorrectDatabaseVersion(DatabaseError):
         self.path = path
         self.version = version
         self.expected_version = expected_version
+
+
+class _ProcOutputItem(Protocol):
+    out: bytes
+    kind: Literal['error', 'output']
 
 
 def _exec_kw(db: Union[sqlite3.Connection, sqlite3.Cursor], stmt: str, **kwargs: QueryParameter) -> sqlite3.Cursor:
@@ -505,8 +511,8 @@ class Database:
              event=event,
              time=(time or datetime.datetime.now()).timestamp())
 
-    def store_proc_execution(self, trun_id: TaskRunID, *, cmd: Sequence[str], cwd: PurePath, stdout: Optional[bytes],
-                             stderr: Optional[bytes], retc: int, start_time: datetime.datetime,
+    def store_proc_execution(self, trun_id: TaskRunID, *, cmd: Sequence[str], cwd: PurePath,
+                             output: Iterable[_ProcOutputItem] | None, retc: int, start_time: datetime.datetime,
                              duration: float) -> ProcExecID:
         """
         Record the execution of a subprocess.
@@ -543,12 +549,13 @@ class Database:
                 :duration
             )
         '''
+        output = output or ()
         rowid = self(q,
                      trun_id=trun_id,
                      cmd=json.dumps(cmd),
                      cwd=str(cwd),
-                     stdout=stdout,
-                     stderr=stderr,
+                     stdout=b''.join(o.out for o in output if o.kind == 'output'),
+                     stderr=b''.join(o.out for o in output if o.kind == 'error'),
                      retc=retc,
                      start_time=start_time.timestamp(),
                      duration=duration).lastrowid
@@ -729,7 +736,7 @@ class _DatabaseExt(BaseExtension[_AppContext, GlobalContext, _TaskContextPriv]):
         iv = self.global_data().database.new_interval(self.task_data().pub.task_run_id, name)
         self.task_data().iv_stack.append(iv)
 
-    def _iv_end(self, nil: None) -> None:
+    def _iv_end(self, _: None) -> None:
         iv = self.task_data().iv_stack.pop()
         self.global_data().database.set_interval_end(iv)
 

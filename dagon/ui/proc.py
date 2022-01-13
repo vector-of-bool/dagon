@@ -1,45 +1,53 @@
 from __future__ import annotations
-from typing import Iterable, NamedTuple, Sequence
-import textwrap
+
 import itertools
 import shlex
+import textwrap
+from typing import Iterable, NamedTuple, Sequence
 
-from . import ansi
+from typing_extensions import Literal, Protocol
+
+from dagon.ui.message import Message, MessageType
+
+
+class _ProcOutputItem(Protocol):
+    out: bytes
+    kind: Literal['error', 'output']
 
 
 class ProcessResultUIInfo(NamedTuple):
     command: Sequence[str]
     retcode: int
-    stdout: bytes
-    stderr: bytes
+    output: Sequence[_ProcOutputItem]
 
 
-def _make_label_pair(label: str, content: str, width: int) -> Iterable[str]:
+def _make_label_pair(label: str, content: str, width: int) -> Iterable[Message]:
     left = f'{label}: '
-    lines = textwrap.wrap(content, width=width, initial_indent=left, subsequent_indent=' ' * len(left))
+    lines = textwrap.wrap(content, width=width - 1, initial_indent=left, subsequent_indent=' ' * len(left))
     for l in lines:
-        line = f'| {l: <{width}} │'
-        yield line
+        line = f'│ {l: <{width}} │'
+        yield Message(line, MessageType.MetaPrint)
 
 
-def _print_boxed_output(label: str, content: str, width: int) -> Iterable[str]:
-    yield f'├{f" {label} ":─^{width+2}}┤'
-    for l in content.splitlines():
-        l = ansi.strip_escapes(l)
-        for wl in textwrap.wrap(l, width=width, subsequent_indent=' ⏎ ', drop_whitespace=False):
-            yield f'│ {wl: <{width}} │'
+def _print_boxed_output(output: Iterable[_ProcOutputItem], width: int) -> Iterable[Message]:
+    yield Message(f'└{f" Output: ":─<{width+2}}┘', MessageType.MetaPrint)
+    for item in output:
+        l = item.out.decode(errors='surrogateescape').rstrip()
+        if item.kind == 'error':
+            yield Message(l, MessageType.Error)
+        else:
+            yield Message(l, MessageType.Print)
 
 
-def _box_lines(result: ProcessResultUIInfo, max_width: int) -> Iterable[str]:
+def _box_lines(result: ProcessResultUIInfo, max_width: int) -> Iterable[Message]:
     cmd_plain = ' '.join(shlex.quote(s) for s in result.command)
-    max_out = max((len(l) for l in result.stdout.splitlines()), default=0)
-    max_err = max((len(l) for l in result.stderr.splitlines()), default=0)
     max_cmd = len(cmd_plain) + 10
-    inner_width = max(max_out, max_err, max_cmd, 10)
-    inner_width = min(inner_width, max_width - 4)
+    max_line = max((len(l.out) for l in result.output), default=0) - 5
+    inner_width = max(max_cmd, max_line, 10)
+    inner_width = min(inner_width, max(10, max_width - 15))
     # The top of the box:
     top = f'╒{"":═<{inner_width+2}}╕'
-    yield top
+    yield Message(top, MessageType.MetaPrint)
     # Labels:
     pairs = (
         ('Command', cmd_plain),
@@ -47,12 +55,9 @@ def _box_lines(result: ProcessResultUIInfo, max_width: int) -> Iterable[str]:
     )
     yield from itertools.chain.from_iterable(_make_label_pair(label, txt, inner_width) for label, txt in pairs)
     # The actual output:
-    if result.stdout:
-        yield from _print_boxed_output('stdout', result.stdout.decode('utf-8', 'surrogateescape'), inner_width)
-    if result.stderr:
-        yield from _print_boxed_output('stderr', result.stderr.decode('utf-8', 'surrogateescape'), inner_width)
-    yield f'└{"":─<{inner_width+2}}┘'
+    yield from _print_boxed_output(result.output, inner_width)
+    yield Message(f'└{" End of output ":─<{inner_width+2}}┘', MessageType.MetaPrint)
 
 
-def make_proc_info_box(result: ProcessResultUIInfo, max_width: int | None = None) -> str:
-    return '\n'.join(_box_lines(result, max_width or 9999999))
+def make_proc_info_box(result: ProcessResultUIInfo, max_width: int | None = None) -> Iterable[Message]:
+    return _box_lines(result, max_width or 9999999)

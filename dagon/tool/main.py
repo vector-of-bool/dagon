@@ -105,7 +105,7 @@ def run_with_args(dag: TaskDAG, exts: ExtLoader, args: ParsedArgs, default_tasks
 
     results = exe.run_all_until_complete()
     failed = False
-    for item in results:
+    for item in results.values():
         if isinstance(item.result, Failure):
             _print_failure(item.task.name, item.result)
             failed = True

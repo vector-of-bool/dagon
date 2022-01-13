@@ -47,19 +47,19 @@ async def test_add_and_run() -> None:
         pass
 
     results = await dag.execute(['print-string'])
-    assert results == {
+    assert set(results.values()) == {
         NodeResult(string, Success('hello')),
         NodeResult(print_string, Success(None)),
     }
 
     results = await dag.execute(['print-string2'])
-    assert results == {
+    assert set(results.values()) == {
         NodeResult(string, Success('hello')),
         NodeResult(print_string2, Success(None)),
     }
 
     results = await dag.execute(['final-tgt'])
-    assert results == {
+    assert set(results.values()) == {
         NodeResult(string, Success('hello')),
         NodeResult(print_string, Success(None)),
         NodeResult(print_string2, Success(None)),
@@ -91,12 +91,12 @@ async def _run_oo_test(use_oo_deps: bool) -> None:
         result = await dag.execute([_second.name])
 
     if use_oo_deps:
-        assert result == {
+        assert set(result.values()) == {
             NodeResult(_first, Success(None)),
             NodeResult(_second, Success(None)),
         }
     else:
-        assert result == {NodeResult(_second, Success(None))}
+        assert set(result.values()) == {NodeResult(_second, Success(None))}
 
 
 @async_test
@@ -115,7 +115,7 @@ def run_test_on_fun(fn: Callable[[], Coroutine[None, None, None]], **kw: Any) ->
         dag.add_task(t)
         graph = dag.low_level_graph([t.name])
         results = ExtAwareExecutor(exts, graph, catch_signals=False).run_all_until_complete()
-        for f in results:
+        for f in results.values():
             if isinstance(f.result, Failure):
                 f.result.reraise()
             assert isinstance(f.result, Success)

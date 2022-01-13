@@ -19,14 +19,14 @@ from typing import (Any, Callable, Iterable, Mapping, NamedTuple, Sequence, Unio
 
 from typing_extensions import Literal, Protocol
 
+from dagon.ui.message import MessageType
+
 from ..event.cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from ..fs import Pathish
 from .. import db as db_mod, ui
 from ..task import Dependency, DependsArg, Task, TaskDAG, current_dag
 
 _AioProcess = asyncio.subprocess.Process
-
-LineHandler = Callable[[bytes], None]
 
 CommandArg = Union[Pathish, str, int, float]
 CommandLineElement = Union[CommandArg, Iterable['CommandLineElement']]
@@ -40,7 +40,15 @@ An arbitrarily nested process command. Each element must be a `str`, `int`,
 
 ProcessCompletionCallback = Callable[['RunningProcess', 'ProcessResult'], None]
 
-OutputMode = Literal['accumulate', 'silent', 'live', 'status']
+OutputMode = Literal['print', 'status', 'silent', 'accumulate']
+
+
+class ProcessOutputItem(NamedTuple):
+    out: bytes
+    kind: Literal['error', 'output']
+
+
+LineHandler = Callable[[ProcessOutputItem], None]
 
 
 class ProcessResult(Protocol):
@@ -54,13 +62,8 @@ class ProcessResult(Protocol):
         ...
 
     @property
-    def stdout(self) -> bytes:
-        "The output of the process"
-        ...
-
-    @property
-    def stderr(self) -> bytes:
-        "The error output of the process"
+    def output(self) -> Sequence[ProcessOutputItem]:
+        "The output records of the subprocess"
         ...
 
     def stdout_json(self) -> Any:
@@ -70,13 +73,11 @@ class ProcessResult(Protocol):
 
 class _ProcessResultTup(NamedTuple):
     retcode: int
-    stdout: bytes
-    stderr: bytes
+    output: Sequence[ProcessOutputItem]
 
     def stdout_json(self) -> Any:
-        if self.stdout is None:
-            raise RuntimeError('Cannot interpret null process stdout as JSON data')
-        return json.loads(self.stdout.decode())
+        dat = b''.join(i.out for i in self.output if i.kind == 'output')
+        return json.loads(dat)
 
 
 class RunningProcess:
@@ -105,8 +106,11 @@ class RunningProcess:
         self._line_handler = line_handler
         self._on_done = on_done
 
-        self._stderr: asyncio.Future[bytes | None] = loop.create_task(self._read(proc.stderr))
-        self._stdout: asyncio.Future[bytes | None] = loop.create_task(self._read(proc.stdout))
+        assert proc.stderr
+        assert proc.stdout
+        self._output: list[ProcessOutputItem] = []
+        self._stderr: asyncio.Future[None] = loop.create_task(self._read(proc.stderr, 'error'))
+        self._stdout: asyncio.Future[None] = loop.create_task(self._read(proc.stdout, 'output'))
         self._result: asyncio.Task[ProcessResult] = loop.create_task(self._wait_result())
         self._timer: asyncio.TimerHandle | None = None
         if timeout is not None:
@@ -115,41 +119,40 @@ class RunningProcess:
         self._cancelled = False
         self._timed_out = False
 
-    async def _read(self, pipe: asyncio.StreamReader | None) -> bytes | None:
+    async def _read(self, pipe: asyncio.StreamReader, kind: Literal['error', 'output']) -> None:
         if pipe is None:
             return None
-        if self._line_handler is None:
-            return await pipe.read()
 
-        acc = b''
         line_acc = b''
         while 1:
             data = await pipe.read(1024)
             line_acc += data
-            acc += data
             while True:
                 nl_offset = line_acc.find(b'\n')
                 if nl_offset < 0:
                     break
                 line, line_acc = line_acc[:nl_offset + 1], line_acc[nl_offset + 1:]
-                self._line_handler(line)
+                item = ProcessOutputItem(line, kind)
+                if self._line_handler:
+                    self._line_handler(item)
+                self._output.append(item)
             if not data:
                 break
         if line_acc:
             # Flush any remaining bytes that may not have been followed by a newline
-            self._line_handler(line_acc)
-        return acc
+            item = ProcessOutputItem(line_acc, kind)
+            if self._line_handler:
+                self._line_handler(item)
+            self._output.append(item)
 
     async def _wait_result(self) -> ProcessResult:
         rc = await self._pipe.wait()
-        out = await self._stdout
-        err = await self._stderr
-        assert out is not None
-        assert err is not None
+        await self._stdout
+        await self._stderr
         self._done = True
         if self._timer:
             self._timer.cancel()
-        result = _ProcessResultTup(rc, out, err)
+        result = _ProcessResultTup(rc, self._output)
         if self._on_done:
             self._on_done(self, result)
         if self._timed_out:
@@ -324,8 +327,7 @@ def _record_proc(db: db_mod.Database, task_run_id: db_mod.TaskRunID, cmd: Sequen
         task_run_id,
         cmd=cmd,
         cwd=cwd,
-        stdout=result.stdout,
-        stderr=result.stderr,
+        output=result.output,
         retc=result.retcode,
         start_time=start_time,
         duration=dur.total_seconds(),
@@ -335,15 +337,15 @@ def _record_proc(db: db_mod.Database, task_run_id: db_mod.TaskRunID, cmd: Sequen
     db.set_interval_end(iv, end_time)
 
 
-def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool, echo_on_done: bool,
+def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool, print_output_on_finish: bool,
                result: ProcessResult, proc: RunningProcess, next_handler: ProcessCompletionCallback) -> None:
     gctx = db_mod.global_context_data()
     tctx = db_mod.task_context_data()
     if record and gctx and tctx:
         # Store this process execution in the database
         _record_proc(gctx.database, tctx.task_run_id, cmd, start_time, cwd, result)
-    if echo_on_done:
-        ui.process_done(ui.ProcessResultUIInfo(cmd, result.retcode, result.stdout, result.stderr))
+    if print_output_on_finish:
+        ui.process_done(ui.ProcessResultUIInfo(cmd, result.retcode, result.output))
     next_handler(proc, result)
 
 
@@ -353,9 +355,9 @@ async def spawn(cmd: CommandLine,
                 env: Mapping[str, str] | None = None,
                 merge_env: bool = True,
                 stdin_pipe: bool = False,
-                on_line: LineHandler | None = None,
+                on_output: OutputMode | LineHandler | None = None,
                 on_done: ProcessCompletionCallback | None = None,
-                echo_on_done: bool = True,
+                print_output_on_finish: bool | None = None,
                 record: bool = True,
                 cancel: CancellationToken | None = None,
                 timeout: datetime.timedelta | None = None) -> RunningProcess:
@@ -423,8 +425,13 @@ async def spawn(cmd: CommandLine,
     prev_on_done = on_done
     start_time = datetime.datetime.now()
     cwd_ = cwd
+    if print_output_on_finish is None:
+        print_output_on_finish = on_output == 'accumulate'
     # Call _proc_done when the process completes
-    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, record, echo_on_done, p1, p0, prev_on_done)
+    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, record, print_output_on_finish, p1, p0,
+                                        prev_on_done)
+
+    on_line = as_line_handler(on_output)
 
     # Spawn that subprocess!
     proc = await asyncio.create_subprocess_exec(
@@ -455,20 +462,18 @@ async def spawn(cmd: CommandLine,
     return ret
 
 
-class UpdateStatus:
-    def __init__(self, prefix: str) -> None:
-        self._prefix = prefix
-
-    def __call__(self, line: bytes) -> None:
-        ui.status(self._prefix + ' ' + line.decode(errors='?'))
+class _UpdateStatus:
+    def __call__(self, line: ProcessOutputItem) -> None:
+        ui.status(line.out.decode(errors='?'))
 
 
 class _LogLine:
-    def __call__(self, line: bytes) -> None:
-        ui.print(line.decode(errors='?'))
+    def __call__(self, line: ProcessOutputItem) -> None:
+        ui.print(line.out.decode(errors='?'), type=MessageType.Error if line.kind == 'error' else MessageType.Print)
 
 
-LOG_LINE: LineHandler = _LogLine()
+PRINT_OUTPUT: LineHandler = _LogLine()
+UPDATE_STATUS_OUTPUT: LineHandler = _UpdateStatus()
 
 
 async def run(cmd: CommandLine,
@@ -478,9 +483,9 @@ async def run(cmd: CommandLine,
               merge_env: bool = True,
               stdin: None | str | bytes = None,
               check: bool = True,
-              on_line: LineHandler | None = None,
+              on_output: LineHandler | OutputMode | None = None,
               on_done: ProcessCompletionCallback | None = None,
-              echo_on_done: bool = True,
+              print_output_on_finish: bool | None = None,
               record: bool = True,
               cancel: CancellationToken | None = None,
               timeout: datetime.timedelta | None = None) -> ProcessResult:
@@ -504,9 +509,9 @@ async def run(cmd: CommandLine,
         env=env,
         merge_env=merge_env,
         stdin_pipe=stdin is not None,
-        on_line=on_line,
+        on_output=on_output,
         on_done=on_done,
-        echo_on_done=echo_on_done,
+        print_output_on_finish=print_output_on_finish,
         record=record,
         cancel=cancel,
         timeout=timeout,
@@ -514,11 +519,13 @@ async def run(cmd: CommandLine,
     result = await proc.communicate(stdin)
     if check:
         if result.retcode != 0:
+            stdout = b''.join(o.out for o in result.output if o.kind == 'output')
+            stderr = b''.join(o.out for o in result.output if o.kind == 'error')
             raise subprocess.CalledProcessError(
                 result.retcode,
                 plain_commandline(cmd),
-                output=result.stdout,
-                stderr=result.stderr,
+                output=stdout,
+                stderr=stderr,
             )
     return result
 
@@ -539,13 +546,13 @@ def define_cmd_task(name: str,
                     dag: TaskDAG | None = None,
                     cwd: Pathish | None = None,
                     doc: str = '',
-                    output: OutputMode = 'accumulate',
-                    echo_on_done: bool | None = None,
+                    on_output: LineHandler | OutputMode | None = 'accumulate',
+                    print_output_on_finish: bool | None = None,
                     check: bool = True,
                     default: bool = False,
                     depends: DependsArg = (),
                     env: dict[str, str] | None = None,
-                    order_only_deps: DependsArg = (),
+                    order_only_depends: DependsArg = (),
                     disabled_reason: str | None = None) -> Task[ProcessResult]:
     """
     Declare a task that executes the given command. See
@@ -557,22 +564,13 @@ def define_cmd_task(name: str,
     assert cmd, '`cmd` must not be empty for declare_cmd_task'
 
     async def _command_runner() -> ProcessResult:
-        on_line: LineHandler
-        if output in ('silent', 'accumulate'):
-            on_line = lambda b: None
-        elif output == 'live':
-            on_line = LOG_LINE
-        else:
-            assert output == 'status', f'Invalid output={output!r}"'
-            on_line = UpdateStatus('')
-
         return await run(
             cmd,
             cwd=cwd,
             check=check,
             env=env,
-            on_line=on_line,
-            echo_on_done=output != 'silent' if echo_on_done is None else echo_on_done,
+            on_output=on_output,
+            print_output_on_finish=print_output_on_finish,
         )
 
     dag = dag or current_dag()
@@ -580,7 +578,7 @@ def define_cmd_task(name: str,
     if isinstance(depends, (Task, str)):
         depends = [depends]
 
-    depends_ = _iter_deps(depends, order_only_deps)
+    depends_ = _iter_deps(depends, order_only_depends)
 
     t = Task[ProcessResult](name=name,
                             fn=_command_runner,
@@ -590,3 +588,17 @@ def define_cmd_task(name: str,
                             disabled_reason=disabled_reason)
     dag.add_task(t)
     return t
+
+
+def as_line_handler(l: LineHandler | OutputMode | None) -> LineHandler | None:
+    if l is None:
+        return None
+    if callable(l):
+        return l
+    if l in ('accumulate', 'silent'):
+        return None
+    if l == 'print':
+        return PRINT_OUTPUT
+    if l == 'status':
+        return UPDATE_STATUS_OUTPUT
+    assert False, f'Invalid value for line_handler/on_output: {l!r}'

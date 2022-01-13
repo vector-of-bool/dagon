@@ -7,8 +7,8 @@ import os
 import signal
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from types import FrameType
-from typing import (TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, NamedTuple, Sequence,
-                    TypeVar, cast, overload)
+from typing import (TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping, NamedTuple,
+                    Sequence, TypeVar, cast, overload)
 
 from ..core import LowLevelDAG, NodeResult, Success, exec
 from ..util import (NoneSuch, Opaque, first, nearest_matching, scope_set_contextvar)
@@ -107,10 +107,11 @@ class TaskDAG:
         graph = self.low_level_graph(marks)
         return TaskExecutor[Opaque](graph, exec_fn=exec_fn, catch_signals=True)
 
-    async def execute(self,
-                      marks: Iterable[str],
-                      *,
-                      exec_fn: Callable[[Task[T]], Awaitable[T]] = default_execute) -> set[NodeResult[Task[Any]]]:
+    async def execute(
+            self,
+            marks: Iterable[str],
+            *,
+            exec_fn: Callable[[Task[T]], Awaitable[T]] = default_execute) -> Mapping[Task[Any], NodeResult[Task[Any]]]:
         ex = self.create_executor(marks, exec_fn=exec_fn)
         return await ex.run_all()
 
@@ -129,12 +130,6 @@ def current_task() -> Task[Any]:
 
 @overload
 def result_of(task: Task[T]) -> Awaitable[T]:
-    """
-    Obtain the result of the given task.
-
-    The other task must be a direct dependency of the currently executing task,
-    and must not be an order-only dependency.
-    """
     ...
 
 
@@ -144,6 +139,12 @@ def result_of(task: str) -> Awaitable[Any]:
 
 
 def result_of(task: Task[Any] | str) -> Awaitable[Any]:
+    """
+    Obtain the result of the given task.
+
+    The other task must be a direct dependency of the currently executing task,
+    and must not be an order-only dependency.
+    """
     ctx = _CTX_EXEC.get()
     ctx_task = ctx.task
     if isinstance(task, str):
@@ -213,7 +214,8 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
             for sig, prev in zip(sigs, prev_handlers):
                 signal.signal(sig, prev)
 
-    def _do_stop_threadsafe(self, _signum: int, _frame: None | FrameType, cancel: CancellationToken,
+    @staticmethod
+    def _do_stop_threadsafe(_signum: int, _frame: None | FrameType, cancel: CancellationToken,
                             loop: asyncio.AbstractEventLoop) -> None:
         loop.call_soon_threadsafe(cancel.cancel)
 

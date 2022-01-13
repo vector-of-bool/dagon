@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import traceback
 import warnings
-from typing import Any, Callable, Dict, Generic, NamedTuple
+from typing import Any, Callable, Dict, Generic, Mapping, NamedTuple
 
 from ..util import T, unused
 
@@ -82,8 +82,8 @@ class EventMap:
     """
     A collection of named events.
     """
-    def __init__(self) -> None:
-        self._events: dict[str, Event[Any]] = {}
+    def __init__(self, *, events: Mapping[str, Event[Any]] | None = None) -> None:
+        self._events: dict[str, Event[Any]] = dict(events) if events is not None else {}
 
     def __getitem__(self, name: str) -> Event[Any]:
         """Obtain the event associated with `name`, or raise `KeyError`"""
@@ -94,8 +94,7 @@ class EventMap:
         return name in self._events
 
     def clone(self) -> EventMap:
-        e = EventMap()
-        e._events = e._events.copy()
+        e = EventMap(events=self._events)
         return e
 
     def register(self, name: str, event: Event[T]) -> Event[T]:

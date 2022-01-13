@@ -286,7 +286,7 @@ class FancyUI:
         self._pending_output += s
         self._redraw()
 
-    def _on_message(self, msg: Message) -> None:
+    def _append_message(self, msg: Message) -> None:
         text = msg.content
         if msg.type in (MessageType.Print, MessageType.MetaPrint):
             if msg.type == MessageType.MetaPrint:
@@ -302,6 +302,9 @@ class FancyUI:
             MessageType.Information: ansi.bold_cyan,
         }.get(msg.type, ansi.bold_cyan)
         self._pending_output += col(text) + '\n'
+
+    def _on_message(self, msg: Message) -> None:
+        self._append_message(msg)
         # Redraw the screen immediately
         self._redraw()
 
@@ -321,8 +324,8 @@ class FancyUI:
         self._schedule_redraw()
 
     def _on_proc_done(self, result: ProcessResultUIInfo) -> None:
-        box = make_proc_info_box(result, max_width=ansi.get_term_width())
-        self._pending_output += box + '\n'
+        for m in make_proc_info_box(result, max_width=ansi.get_term_width()):
+            self._append_message(m)
         self._schedule_redraw()
 
 

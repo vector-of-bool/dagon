@@ -24,7 +24,7 @@ dagon.util.doc.__sphinx_build__ = True
 # -- Project information -----------------------------------------------------
 
 project = 'Dagon'
-copyright = '2021'
+copyright = '2022'
 author = 'vector-of-bool'
 
 # The short X.Y version

@@ -258,7 +258,7 @@ class NativeFileStorage:
         except FileExistsError:
             if if_exists == 'fail':
                 raise
-            elif if_exists == 'keep':
+            if if_exists == 'keep':
                 yield None
             else:
                 assert 0
