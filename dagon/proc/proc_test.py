@@ -74,12 +74,12 @@ async def test_output_handler():
         nonlocal acc
         acc += data.out.decode()
 
-    res = await proc.run([sys.executable, '-c', 'import sys; sys.stdout.write("abc\\n")'], on_line=handle)
+    res = await proc.run([sys.executable, '-c', 'import sys; sys.stdout.write("abc\\n")'], on_output=handle)
     assert _join_out(res.output) == b'abc\n'
     assert acc == 'abc\n'
 
     acc = ''
 
-    res = await proc.run([sys.executable, '-c', 'import sys; sys.stdout.write("abc")'], on_line=handle)
+    res = await proc.run([sys.executable, '-c', 'import sys; sys.stdout.write("abc")'], on_output=handle)
     assert _join_out(res.output) == b'abc'
     assert acc == 'abc'
