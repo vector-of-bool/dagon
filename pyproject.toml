@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "dagon"
-version = "0.9.9"
-description = "An asynchronous DAG-based task execution platform"
+version = "0.9.0"
+description = "An asynchronous task graph execution system"
 authors = ["vector-of-bool <vectorofbool@gmail.com>"]
 packages = [
     { include = "dagon" },
