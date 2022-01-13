@@ -19,12 +19,12 @@ from typing import (Any, Callable, Iterable, Mapping, NamedTuple, Sequence, Unio
 
 from typing_extensions import Literal, Protocol
 
-from dagon.ui.message import MessageType
-
+from .. import db as db_mod
+from .. import ui
 from ..event.cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from ..fs import Pathish
-from .. import db as db_mod, ui
-from ..task import Dependency, DependsArg, Task, TaskDAG, current_dag
+from ..task import (DependsArg, Task, TaskDAG, current_dag, iter_deps)
+from ..ui.message import MessageType
 
 _AioProcess = asyncio.subprocess.Process
 
@@ -530,16 +530,6 @@ async def run(cmd: CommandLine,
     return result
 
 
-def _iter_deps(deps: DependsArg | None, order_only_depends: DependsArg | None) -> Iterable[Dependency]:
-    for dep in (deps or ()):
-        d = dep if isinstance(dep, str) else dep.name
-        yield Dependency(d, is_order_only=False)
-
-    for dep in (order_only_depends or ()):
-        d = dep if isinstance(dep, str) else dep.name
-        yield Dependency(d, is_order_only=True)
-
-
 def define_cmd_task(name: str,
                     cmd: CommandLine,
                     *,
@@ -578,7 +568,7 @@ def define_cmd_task(name: str,
     if isinstance(depends, (Task, str)):
         depends = [depends]
 
-    depends_ = _iter_deps(depends, order_only_depends)
+    depends_ = iter_deps(depends, order_only_depends)
 
     t = Task[ProcessResult](name=name,
                             fn=_command_runner,

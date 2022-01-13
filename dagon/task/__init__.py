@@ -42,7 +42,7 @@ a ``str``, or a sequence thereof.
 """
 
 
-def _iter_deps(deps: DependsArg | None, order_only_depends: DependsArg | None) -> Iterable[Dependency]:
+def iter_deps(deps: DependsArg | None, order_only_depends: DependsArg | None) -> Iterable[Dependency]:
     for dep in (deps or ()):
         d = dep if isinstance(dep, str) else dep.name
         yield Dependency(d, is_order_only=False)
@@ -97,7 +97,7 @@ def task_from_function(fn: TaskFunction[T],
     t: Task[T] = cls(
         name=name,
         fn=fn,
-        depends=list(_iter_deps(
+        depends=list(iter_deps(
             deps=depends or (),
             order_only_depends=order_only_depends or (),
         )),
