@@ -6,6 +6,8 @@ authors = ["vector-of-bool <vectorofbool@gmail.com>"]
 packages = [
     { include = "dagon" },
 ]
+readme = "README.md"
+repository = "https://github.com/vector-of-bool/dagon"
 
 [tool.poetry.dependencies]
 python = "^3.7"
