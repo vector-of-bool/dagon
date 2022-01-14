@@ -21,7 +21,7 @@ from typing import (TYPE_CHECKING, Any, AsyncContextManager, AsyncIterable, Asyn
 
 from typing_extensions import Literal, ParamSpec
 
-from ..event.cancel import CancellationToken, raise_if_cancelled
+from ..event import CancellationToken, raise_if_cancelled
 from ..util import T
 from ..util.doc import __sphinx_build__
 
