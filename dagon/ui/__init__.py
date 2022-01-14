@@ -18,7 +18,7 @@ from ..ext.iface import OpaqueTaskGraphView
 from ..task.dag import OpaqueTask
 from ..util import AsyncNullContext, Opaque, ReadyAwaitable, unused
 from .iface import I_UIExtension
-from .proc import ProcessResultUIInfo
+from .proc import PrintProcessResultUIInfo
 
 if sys.version_info < (3, 8):
     from importlib_metadata import EntryPoint
@@ -150,8 +150,8 @@ def progress(value: float | None) -> None:
     _EVENTS.progress.emit(ProgressInfo(value))
 
 
-def process_done(result: ProcessResultUIInfo) -> None:
-    _EVENTS.process_done.emit(result)
+def print_process_done(result: PrintProcessResultUIInfo) -> None:
+    _EVENTS.print_process_done.emit(result)
 
 
 unused(_Ext)

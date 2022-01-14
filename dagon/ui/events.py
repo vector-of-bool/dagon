@@ -5,7 +5,7 @@ from dagon.core.result import NodeResult
 
 from dagon.task.dag import OpaqueTask
 from dagon.ui.message import Message
-from dagon.ui.proc import ProcessResultUIInfo
+from dagon.ui.proc import PrintProcessResultUIInfo
 
 from ..event import Event
 
@@ -19,4 +19,4 @@ class UIEvents(NamedTuple):
     status: Event[str] = Event()
     task_result: Event[NodeResult[OpaqueTask]] = Event()
     progress: Event[ProgressInfo] = Event()
-    process_done: Event[ProcessResultUIInfo] = Event()
+    print_process_done: Event[PrintProcessResultUIInfo] = Event()

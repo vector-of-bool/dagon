@@ -349,7 +349,7 @@ def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, rec
         # Store this process execution in the database
         _record_proc(gctx.database, tctx.task_run_id, cmd, start_time, cwd, result)
     if (print_output_on_finish == 'always' or (print_output_on_finish == 'on-fail' and result.retcode != 0)):
-        ui.process_done(ui.ProcessResultUIInfo(cmd, result.retcode, result.output))
+        ui.print_process_done(ui.PrintProcessResultUIInfo(cmd, result.retcode, result.output))
     next_handler(proc, result)
 
 
