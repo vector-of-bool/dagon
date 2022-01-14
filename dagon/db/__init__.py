@@ -17,17 +17,17 @@ from contextlib import ExitStack, asynccontextmanager, nullcontext
 from pathlib import Path, PurePath, PurePosixPath
 from typing import (Any, AsyncGenerator, AsyncIterator, ContextManager, Iterable, NamedTuple, NewType, Optional,
                     Sequence, Union, cast)
-from typing_extensions import Protocol
 
-from dagon.core.result import Cancellation, Failure, NodeResult, Success
-from dagon.ext.iface import OpaqueTaskGraphView
-from dagon.task.dag import OpaqueTask
-from typing_extensions import Literal, TypeAlias
+from typing_extensions import Literal, Protocol, TypeAlias
 
 from .. import util
-from ..event import events
+from ..core.result import Cancellation, Failure, NodeResult, Success
+from ..event import Event, events
 from ..ext.base import BaseExtension
+from ..ext.iface import OpaqueTaskGraphView
 from ..fs import Pathish
+from ..proc import CompletedProcess
+from ..task.dag import OpaqueTask
 from ..util import Undefined, fixup_dataclass_docs
 
 QueryParameter = Union[int, str, bytes, float, None]
@@ -730,6 +730,8 @@ class _DatabaseExt(BaseExtension[_AppContext, GlobalContext, _TaskContextPriv]):
         with ExitStack() as st:
             st.enter_context(events['dagon.interval-start'].connect(self._iv_start))
             st.enter_context(events['dagon.interval-end'].connect(self._iv_end))
+            st.enter_context(
+                events.get_or_register('dagon.proc.done', Event[CompletedProcess]).connect(self._proc_done))
             yield _TaskContextPriv(TaskContext(tid, trun_id, now), [])
 
     def _iv_start(self, name: str) -> None:
@@ -739,6 +741,25 @@ class _DatabaseExt(BaseExtension[_AppContext, GlobalContext, _TaskContextPriv]):
     def _iv_end(self, _: None) -> None:
         iv = self.task_data().iv_stack.pop()
         self.global_data().database.set_interval_end(iv)
+
+    def _proc_done(self, p: CompletedProcess) -> None:
+        # Store this process execution in the database
+        db = self.global_data().database
+        trun_id = self.task_data().pub.task_run_id
+        iv = db.new_interval(trun_id, f'Subprocess {p.command}', p.start_time)
+        dur = p.end_time - p.start_time
+        pid = db.store_proc_execution(
+            trun_id,
+            cmd=p.command,
+            cwd=p.cwd,
+            output=p.result.output,
+            retc=p.result.retcode,
+            start_time=p.start_time,
+            duration=dur.total_seconds(),
+        )
+        meta = {'process_id': pid}
+        db.set_interval_meta(iv, meta)
+        db.set_interval_end(iv, p.end_time)
 
     async def notify_result(self, result: NodeResult[OpaqueTask]) -> None:
         db = self.global_data()

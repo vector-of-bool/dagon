@@ -19,12 +19,13 @@ from typing import (Any, Callable, Iterable, Mapping, NamedTuple, Sequence, Unio
 
 from typing_extensions import Literal, Protocol
 
-from .. import db as db_mod
+from ..event import Event, events
+
 from .. import ui
 from ..event.cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from ..fs import Pathish
 from ..task import (DependsArg, Task, TaskDAG, current_dag, iter_deps)
-from ..ui.message import MessageType
+from ..ui import MessageType
 
 _AioProcess = asyncio.subprocess.Process
 
@@ -251,6 +252,15 @@ class RunningProcess:
         return await self.result
 
 
+class CompletedProcess(NamedTuple):
+    start_time: datetime.datetime
+    end_time: datetime.datetime
+    command: Sequence[str]
+    cwd: Path
+    result: ProcessResult
+    process: RunningProcess
+
+
 def arg_to_string(item: CommandArg) -> str:
     """
     Convert a command argument to a string.
@@ -318,36 +328,14 @@ def get_effective_env(env: Mapping[str, str] | None, *, merge: bool = True) -> d
     return final_env
 
 
-def _record_proc(db: db_mod.Database, task_run_id: db_mod.TaskRunID, cmd: Sequence[str], start_time: datetime.datetime,
-                 cwd: Path, result: ProcessResult) -> None:
-    iv = db.new_interval(task_run_id, f'Subprocess {cmd}', start_time)
-    end_time = datetime.datetime.now()
-    dur = end_time - start_time
-    pid = db.store_proc_execution(
-        task_run_id,
-        cmd=cmd,
-        cwd=cwd,
-        output=result.output,
-        retc=result.retcode,
-        start_time=start_time,
-        duration=dur.total_seconds(),
-    )
-    meta = {'process_id': pid}
-    db.set_interval_meta(iv, meta)
-    db.set_interval_end(iv, end_time)
-
-
 _PrintOnFinishArg = Literal['always', 'never', 'on-fail', None]
 
 
-def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool,
-               print_output_on_finish: _PrintOnFinishArg, result: ProcessResult, proc: RunningProcess,
-               next_handler: ProcessCompletionCallback) -> None:
-    gctx = db_mod.global_context_data()
-    tctx = db_mod.task_context_data()
-    if record and gctx and tctx:
-        # Store this process execution in the database
-        _record_proc(gctx.database, tctx.task_run_id, cmd, start_time, cwd, result)
+def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, print_output_on_finish: _PrintOnFinishArg,
+               result: ProcessResult, proc: RunningProcess, next_handler: ProcessCompletionCallback) -> None:
+    end_time = datetime.datetime.now()
+    ev: Event[CompletedProcess] = events.get_or_register('dagon.proc.done', Event)
+    ev.emit(CompletedProcess(start_time, end_time, cmd, cwd, result, proc))
     if (print_output_on_finish == 'always' or (print_output_on_finish == 'on-fail' and result.retcode != 0)):
         ui.print_process_done(ui.PrintProcessResultUIInfo(cmd, result.retcode, result.output))
     next_handler(proc, result)
@@ -362,7 +350,6 @@ async def spawn(cmd: CommandLine,
                 on_output: OutputMode | LineHandler | None = None,
                 on_done: ProcessCompletionCallback | None = None,
                 print_output_on_finish: _PrintOnFinishArg = None,
-                record: bool = True,
                 cancel: CancellationToken | None = None,
                 timeout: datetime.timedelta | None = None) -> RunningProcess:
     """
@@ -435,8 +422,7 @@ async def spawn(cmd: CommandLine,
         else:
             print_output_on_finish = 'on-fail'
     # Call _proc_done when the process completes
-    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, record, print_output_on_finish, p1, p0,
-                                        prev_on_done)
+    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, print_output_on_finish, p1, p0, prev_on_done)
 
     on_line = as_line_handler(on_output)
 
@@ -493,7 +479,6 @@ async def run(cmd: CommandLine,
               on_output: LineHandler | OutputMode | None = None,
               on_done: ProcessCompletionCallback | None = None,
               print_output_on_finish: _PrintOnFinishArg = None,
-              record: bool = True,
               cancel: CancellationToken | None = None,
               timeout: datetime.timedelta | None = None) -> ProcessResult:
     """
@@ -519,7 +504,6 @@ async def run(cmd: CommandLine,
         on_output=on_output,
         on_done=on_done,
         print_output_on_finish=print_output_on_finish,
-        record=record,
         cancel=cancel,
         timeout=timeout,
     )

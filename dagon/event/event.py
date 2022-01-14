@@ -1,8 +1,9 @@
 from __future__ import annotations
+from contextlib import ExitStack, contextmanager
 
 import traceback
 import warnings
-from typing import Any, Callable, Dict, Generic, Mapping, NamedTuple
+from typing import Any, Callable, Dict, Generic, Iterator, Mapping, NamedTuple
 
 from ..util import T, unused
 
@@ -93,9 +94,16 @@ class EventMap:
         """Determine whether there is an event `name`"""
         return name in self._events
 
-    def clone(self) -> EventMap:
-        e = EventMap(events=self._events)
-        return e
+    @contextmanager
+    def child(self) -> Iterator[EventMap]:
+        with ExitStack() as st:
+            more_events = {
+                k: Event[Any]()
+                for k in self._events.keys()
+            }
+            for k in more_events:
+                st.enter_context(self._events[k].connect(more_events[k].emit))
+            yield EventMap(events=more_events)
 
     def register(self, name: str, event: Event[T]) -> Event[T]:
         """

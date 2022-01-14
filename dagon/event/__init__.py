@@ -28,12 +28,13 @@ Event handling
 from __future__ import annotations
 
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, AsyncIterator, Callable, Iterator
+import contextvars
+from typing import Any, AsyncIterator, Callable, Iterator, Type, overload
 
 from ..ext.base import BaseExtension
 from ..ext.iface import OpaqueTaskGraphView
 from ..task.dag import OpaqueTask
-from ..util import T
+from ..util import T, scope_set_contextvar, unused
 from .cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from .event import ConnectionToken, Event, EventMap
 
@@ -51,6 +52,10 @@ __all__ = [
     'mark',
 ]
 
+_DEFAULT_EV_MAP = EventMap()
+
+_EVENTS_CTX = contextvars.ContextVar[EventMap]('_EVENTS_CTX', default=_DEFAULT_EV_MAP)
+
 
 class _EventsExt(BaseExtension[None, EventMap, EventMap]):
     dagon_ext_name = 'dagon.events'
@@ -58,25 +63,26 @@ class _EventsExt(BaseExtension[None, EventMap, EventMap]):
     @asynccontextmanager
     async def global_context(self, graph: OpaqueTaskGraphView) -> AsyncIterator[EventMap]:
         map = EventMap()
-        with CancellationToken.ensure_context_local():
-            yield map
+        prev = _EVENTS_CTX.get()
+        with prev.child() as map:
+            with scope_set_contextvar(_EVENTS_CTX, map):
+                with CancellationToken.ensure_context_local():
+                    yield map
 
     @asynccontextmanager
     async def task_context(self, task: OpaqueTask) -> AsyncIterator[EventMap]:
-        map = self.global_data().clone()
-        map.register('dagon.interval-start', Event[str]())
-        map.register('dagon.interval-end', Event[None]())
-        map.register('dagon.mark', Event[None]())
-        yield map
+        with self.global_data().child() as map:
+            with scope_set_contextvar(_EVENTS_CTX, map):
+                map.register('dagon.interval-start', Event[str]())
+                map.register('dagon.interval-end', Event[None]())
+                map.register('dagon.mark', Event[None]())
+                yield map
 
 
 class _EventsContextLookup:
     @staticmethod
     def _ctx() -> EventMap:
-        try:
-            return _EventsExt.task_data()
-        except LookupError as e:
-            raise RuntimeError('Cannot use dagon.event.events outside of a task context!') from e
+        return _EVENTS_CTX.get()
 
     def __getitem__(self, key: str) -> Event[Any]:
         return self._ctx()[key]
@@ -84,7 +90,7 @@ class _EventsContextLookup:
     def get(self, key: str) -> Event[Any] | None:
         return self._ctx().get(key)
 
-    def get_or_register(self, name: str, factory: Callable[[], Event[T]]) -> Event[T]:
+    def get_or_register(self, name: str, factory: Callable[[], Event[T]] = Event[T]) -> Event[T]:
         return self._ctx().get_or_register(name, factory)
 
     def register(self, name: str, ev: Event[T]) -> Event[T]:
@@ -134,3 +140,6 @@ def mark(name: str) -> None:
     .. note:: May only be called within a task-executing context.
     """
     events['dagon.mark'].emit(name)
+
+
+unused(_EventsExt)
