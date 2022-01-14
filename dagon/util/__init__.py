@@ -35,6 +35,9 @@ class UndefinedType:
             cls._inst = super().__new__(cls)
         return cls._inst
 
+    def __repr__(self) -> str:
+        return 'Undefined'
+
 
 Undefined = UndefinedType()
 """
