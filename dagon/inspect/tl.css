@@ -1,0 +1,352 @@
+:root {
+  --base-color: #c3c3c3;
+  --base-light: #999;
+  --base-dark: #555;
+  --accent-color: #999;
+  --hscale: 1;
+
+  --solid-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.45),
+      inset 0 -1px 0 0 rgba(255, 255, 255, 0.15),
+      0 1px 0 0 rgba(255, 255, 255, 0.15);
+
+  --inset-shadow: inset 0 2px 5px #0006;
+
+  --tl-glow: 0 0 3px 1px rgba(61, 155, 218, .25);
+  --tl-text-shadow: 0 1px rgba(255, 255, 255, 0.4);
+  --tl-text-shadow-dark: 0 1px rgba(0, 0, 0, 0.3);
+  --tl-font-family: Open Sans, Droid Sans, Ubuntu, Helvetica, Arial, Sans;
+  --tl-color: rgb(111, 111, 111);
+
+  --tl-float-radius: 4px;
+  --tl-trace-border: 1px solid #0004;
+
+  --tl-track-height: 40px;
+  --tl-strip-gap: 1px;
+
+  --tl-strip-color-rand-0: rgb(89, 244, 255);
+  --tl-strip-color-rand-1: rgb(112, 191, 255);
+  --tl-strip-color-rand-2: rgb(152, 153, 255);
+  --tl-strip-color-rand-3: rgb(123, 176, 255);
+  --tl-strip-color-rand-4: rgb(200, 188, 255);
+  --tl-strip-color-rand-5: rgb(135, 111, 241);
+  --tl-strip-color-rand-6: rgb(225, 218, 255);
+  --tl-strip-color-rand-7: rgb(218, 238, 255);
+  --tl-strip-color-rand-8: rgb(240, 218, 255);
+  --tl-strip-color-rand-9: rgb(206, 143, 248);
+  --tl-strip-color-rand-10: rgb(143, 248, 231);
+
+  --tl-strip-color-pending: #999;
+  --tl-strip-color-running: #999;
+  --tl-strip-color-succeeded: #4ede4e;
+  --tl-strip-color-failed: #ff1717;
+  --tl-strip-color-cancelled: #efb735;
+
+  --tl-strip-color-process-succeeded: #10ff58;
+  --tl-strip-color-process-failed: #ff3568;
+
+  font-family: var(--tl-font-family);
+  text-shadow: var(--tl-text-shadow);
+}
+
+body {
+  margin: 0;
+  background-color: var(--base-color);
+}
+
+tl-app {
+  --hscale: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid:
+    "timeline" 1fr
+    "status" auto
+    / auto;
+  gap: 10px;
+  padding: 10px;
+}
+
+tl-proc-view {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid:
+    "cmd_label cmd   "   auto
+    "cwd_label cwd   "   auto
+    "rc_label  rc    "   auto
+    "output    output"   1fr
+    "controls  controls" auto
+    / auto     1fr;
+  gap: 10px;
+  padding: 10px;
+}
+
+tl-proc-view > div.label {
+  justify-self: end;
+  align-self: center;
+}
+
+tl-proc-view > div.cmd > span.arg {
+  margin: 2px 3px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  color: #333;
+  box-shadow: var(--solid-shadow);
+  font-family: 'Courier New', Courier, monospace;
+  text-shadow: var(--tl-text-shadow);
+  background-image: linear-gradient(to bottom, transparent, transparent 50%, rgba(0, 0, 0, 0.04));
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+tl-proc-view > div.cmd > span.space {
+  white-space: pre;
+  pointer-events: none;
+  font-size: 0;
+}
+
+tl-proc-view > div.val {
+  display: block;
+  overflow: hidden;
+  line-height: 1;
+  margin: 5px;
+  background-image: linear-gradient(to bottom, #fafafa, #fdfdfd);
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  border-radius: 2.5px;
+  color: #323232;
+  text-shadow: 0 1px rgba(255, 255, 255, 0.4);
+  padding: 3px 6px;
+  background-clip: padding-box;
+  min-width: 50px;
+  transition: 100ms box-shadow ease-in, 100ms border-color ease-in;
+  cursor: text;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+tl-proc-view > div.output {
+  grid-area: output;
+  white-space: pre;
+  box-shadow: var(--inset-shadow);
+  overflow: auto;
+  border-radius: 5px;
+  background-color: rgb(44, 44, 44);
+  color: #eee;
+  font-family: 'Courier New', Courier, monospace;
+  padding: 10px;
+  text-shadow: none;
+
+  /*display: grid;
+  grid-template-columns: auto 1fr;
+  align-content: start;*/
+}
+
+tl-proc-view[wrap-term-output] div.output .term-line {
+  white-space: pre-line;
+}
+
+tl-proc-view div.output > div.term-line:hover {
+  background: #444;
+}
+
+tl-proc-view div.output > div.lno {
+  float: left;
+  margin-right: 5px;
+  padding-right: 5px;
+  user-select: none;
+  color: #ccc;
+  font-style: italic;
+  border-right: 1px solid #999;
+  min-width: 50px;
+  text-align: right;
+}
+
+tl-proc-view div.controls {
+  grid-area: controls;
+  justify-self: end;
+  display: flex;
+  flex-direction: row;
+  justify-content: end;
+}
+
+tl-timeline {
+  position: relative;
+  grid-area: timeline;
+  overflow: auto;
+  border: 1px solid #000a;
+  background-color: #444;
+  border-radius: 5px;
+  box-shadow: var(--inset-shadow);
+  display: flex;
+  flex-direction: column;
+  transition: 1s --hscale linear;
+}
+
+tl-proc-view div.output .term-line:empty {
+  clear: both;
+}
+#status-bar {
+  grid-area: status;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+#tracks-container {
+  display: contents;
+}
+
+#time-cursor {
+  position: absolute;
+  height: 100%;
+  --marker-color: #f00a;
+  border-left: 1px dashed var(--marker-color);
+  box-sizing: border-box;
+  will-change: transform;
+  pointer-events: none;
+}
+
+#time-cursor .label {
+  position: absolute;
+  bottom: 0;
+  margin: 4px 6px;
+  border-radius: 4px;
+  background-image: linear-gradient(to bottom, #fafafa, #fdfdfd);
+
+  padding: 4px 6px;
+  box-shadow: var(--solid-shadow);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+#time-cursor.on-right .label {
+  right: 0;
+}
+
+.checkbox {
+  display: flex;
+  margin: 4px 6px;
+  border-radius: 4px;
+  background-image: linear-gradient(to bottom, transparent, transparent 50%, rgba(0, 0, 0, 0.04));
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  padding: 4px 6px;
+  box-shadow: var(--solid-shadow);
+  cursor: pointer;
+}
+
+tl-app div.controls {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  grid-area: timeline;
+  align-self: end;
+  display: grid;
+  grid:
+    "_1    vert" 1fr
+    "horiz _2"   auto
+    / 1fr auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+tl-app div.controls .zoom {
+  margin: 3px;
+  width: 30px;
+  height: 30px;
+  background-color: #eee;
+  border-radius: 200px;
+  box-shadow: 1px 2px 4px #0005;
+  text-align: center;
+  line-height: 30px;
+  color: #888;
+  cursor: pointer;
+  pointer-events: initial;
+}
+
+tl-timeline-track {
+  min-height: calc(var(--tl-track-height) * var(--tl-track-height-count));
+  min-width: 100%;
+  padding: 5px 0;
+  width: calc(50px + var(--tl-max-time-px) * var(--hscale) + var(--tl-strip-gap) * 2);
+  overflow: hidden;
+  will-change: transform;
+}
+
+tl-timeline-track:nth-child(odd) {
+  background-color: var(--base-dark);
+}
+
+tl-timeline-track {
+  border-bottom: 1px solid var(--accent-color);
+}
+
+tl-strip {
+  position: absolute;
+  box-sizing: border-box;
+  --tl-strip-base-transform:
+    translateX(calc(var(--tl-strip-start-time-px, 0) * var(--hscale)))
+    translateY(calc(var(--tl-strip-vert-offset) * var(--tl-track-height)));
+  transform: var(--tl-strip-base-transform);
+  min-width: 2px;
+  margin: var(--tl-strip-gap);
+  width: calc(var(--tl-strip-duration-px) * var(--hscale));
+  height: calc(
+    var(--tl-track-height)
+    - var(--tl-strip-gap) * 2);
+  border: 1px solid var(--tl-strip-color);
+  white-space: nowrap;
+  --tl-strip-shadow:
+    var(--solid-shadow),
+     0 calc(2px * 1)
+      calc(5px * 1)
+      calc(-1px * 1)
+      rgba(0, 0, 0, 0.8);
+  box-shadow: var(--tl-strip-shadow);
+  border-radius: 2.5px;
+  padding: 6px 0;
+  background-color: var(--tl-strip-color);
+  text-shadow: var(--tl-text-shadow);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+tl-strip.clickable {
+  cursor: pointer;
+}
+
+tl-strip.clickable::before {
+  content: '';
+  background: blue;
+  width: 5px;
+  height: 5px;
+  position: absolute;
+  border: 1px solid #aaab;
+  top: 2px;
+  left: 2px;
+  border-radius: 10px;
+}
+
+tl-strip.clickable:hover {
+  transform: var(--tl-strip-base-transform) translate(-2px, -2px);
+}
+
+tl-strip .label {
+  margin-left: 18px;
+}
+
+div.output .bold { font-weight: bold; }
+div.output .italic { font-style: italic; }
+div.output .underline { text-decoration: underline; }
+div.output .black { color: black; }
+div.output .red { color: red; }
+div.output .green { color: green; }
+div.output .yellow { color: yellow; }
+div.output .blue { color: blue; }
+div.output .magenta { color: magenta; }
+div.output .cyan { color: cyan; }
+div.output .white { color: white; }

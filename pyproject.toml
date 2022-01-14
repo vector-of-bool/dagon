@@ -15,6 +15,7 @@ typing-extensions = "^4.0.1"
 
 [tool.poetry.scripts]
 dagon = "dagon.tool.main:start"
+dagon-inspect = "dagon.inspect.main:start"
 
 [tool.poetry.dev-dependencies]
 yapf = "^0.31.0"
@@ -27,6 +28,7 @@ sphinx-autodoc-typehints = "^1.12.0"
 pytest-asyncio = "^0.16.0"
 pytest-xdist = "^2.5.0"
 litecli = "^1.6.0"
+graphviz = "^0.19.1"
 
 [tool.pyright]
 include = ["dagon/"]
