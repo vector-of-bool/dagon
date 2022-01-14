@@ -15,7 +15,7 @@ from dagon.util import Opaque, scope_set_contextvar
 
 from .iface import AppDataT, GlobalDataT, IExtension, TaskDataT
 
-if sys.version_info < (3, 10):
+if sys.version_info < (3, 8):
     from importlib_metadata import EntryPoint, entry_points
 else:
     from importlib.metadata import EntryPoint, entry_points
@@ -104,6 +104,15 @@ def ext_task_data(ext: str | IExtension[Any, Any, Any]) -> Any:
 
 _OpaqueExt = IExtension[Opaque, Opaque, Opaque]
 "An opaque-typed extension"
+
+
+def get_entry_points(group: str) -> Iterable[EntryPoint]:
+    if sys.version_info < (3, 8):
+        return cast(Iterable[EntryPoint], entry_points(group=group))  # type: ignore
+    elif sys.version_info < (3, 10):
+        return cast(Iterable[EntryPoint], entry_points().get(group))  # type: ignore
+    else:
+        return cast(Iterable[EntryPoint], entry_points().select(group=group))  # type: ignore
 
 
 class ExtLoader:
@@ -231,7 +240,7 @@ class ExtLoader:
         a warning message.
         """
         ret = ExtLoader()
-        eps = cast(Iterable[EntryPoint], entry_points(group='dagon.extensions'))
+        eps = get_entry_points('dagon.extensions')
         for ep in eps:
             cls._try_load_one(ret, ep)
         # Call the order function. This will raise an exception if any extensions

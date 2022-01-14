@@ -6,9 +6,10 @@ import builtins
 import argparse
 import warnings
 from contextlib import AsyncExitStack, ExitStack, asynccontextmanager
-from typing import Any, AsyncIterator, Awaitable, Iterable, cast
+from typing import Any, AsyncIterator, Awaitable
 
 from dagon.core.result import NodeResult
+from dagon.ext import loader
 from dagon.ui.events import ProgressInfo, UIEvents
 from dagon.ui.message import Message, MessageType
 
@@ -19,10 +20,10 @@ from ..util import AsyncNullContext, Opaque, ReadyAwaitable, unused
 from .iface import I_UIExtension
 from .proc import ProcessResultUIInfo
 
-if sys.version_info < (3, 10):
-    from importlib_metadata import EntryPoint, entry_points
+if sys.version_info < (3, 8):
+    from importlib_metadata import EntryPoint
 else:
-    from importlib.metadata import EntryPoint, entry_points
+    from importlib.metadata import EntryPoint
 
 
 class UILoadWarning(Warning):
@@ -54,7 +55,7 @@ class _Ext(BaseExtension[None, I_UIExtension, None]):
     dagon_ext_requires = ['dagon.events']
 
     def __init__(self) -> None:
-        eps = cast(Iterable[EntryPoint], entry_points(group='dagon.uis'))
+        eps = loader.get_entry_points('dagon.uis')
         self._uis: dict[str, I_UIExtension] = {}
         self._chosen_ui: str | None = None
         for ep in eps:
