@@ -18,9 +18,9 @@ from .task import Dependency, Task, TaskFunction
 __all__ = [
     'define',
     'define_in',
-    'define_fn_task',
+    'fn_task',
     'gather',
-    'task_from_function',
+    'create_task_from_function',
     'Task',
     'Dependency',
     'DependsArg',
@@ -52,15 +52,15 @@ def iter_deps(deps: DependsArg | None, order_only_depends: DependsArg | None) ->
         yield Dependency(d, is_order_only=True)
 
 
-def task_from_function(fn: TaskFunction[T],
-                       *,
-                       default: bool = True,
-                       name: str | None = None,
-                       depends: DependsArg = (),
-                       order_only_depends: DependsArg = (),
-                       doc: str | None = None,
-                       cls: Type[Task[T]] = Task,
-                       disabled_reason: str | None = None) -> Task[T]:
+def create_task_from_function(fn: TaskFunction[T],
+                              *,
+                              default: bool = True,
+                              name: str | None = None,
+                              depends: DependsArg = (),
+                              order_only_depends: DependsArg = (),
+                              doc: str | None = None,
+                              cls: Type[Task[T]] = Task,
+                              disabled_reason: str | None = None) -> Task[T]:
     """
     Create a :class:`Task` from the given function.
 
@@ -120,14 +120,14 @@ def _task_decorator(
     disabled_reason: str | None,
 ) -> Callable[[TaskFunction[T]], Task[T]]:
     def decorate_task_fn(fn: TaskFunction[T]) -> Task[T]:
-        t = task_from_function(fn,
-                               default=default,
-                               name=name,
-                               depends=depends,
-                               doc=doc,
-                               order_only_depends=order_only_depends,
-                               cls=cls,
-                               disabled_reason=disabled_reason)
+        t = create_task_from_function(fn,
+                                      default=default,
+                                      name=name,
+                                      depends=depends,
+                                      doc=doc,
+                                      order_only_depends=order_only_depends,
+                                      cls=cls,
+                                      disabled_reason=disabled_reason)
         return dag.add_task(t)
 
     return decorate_task_fn
@@ -186,15 +186,15 @@ def define_in(
     )
 
 
-def define_fn_task(name: str,
-                   fn: Callable[[], Awaitable[T]],
-                   *,
-                   dag: TaskDAG | None = None,
-                   depends: DependsArg = (),
-                   order_only_depends: DependsArg = (),
-                   default: bool = False,
-                   doc: str | None = None,
-                   disabled_reason: str | None = None) -> Task[T]:
+def fn_task(name: str,
+            fn: Callable[[], Awaitable[T]],
+            *,
+            dag: TaskDAG | None = None,
+            depends: DependsArg = (),
+            order_only_depends: DependsArg = (),
+            default: bool = False,
+            doc: str | None = None,
+            disabled_reason: str | None = None) -> Task[T]:
     """
     Create a task that executes a Python coroutine function.
 
@@ -213,7 +213,7 @@ def define_fn_task(name: str,
     async def _fn_trampoline() -> Any:
         return await fn()
 
-    t = task_from_function(
+    t = create_task_from_function(
         _fn_trampoline,
         name=name or dot_kebab_name(fn.__name__),
         default=default,
@@ -306,7 +306,7 @@ def gather(name: str,
         assert return_fn
         return return_fn()
 
-    return define_fn_task(
+    return fn_task(
         name,
         _meta_fn,
         dag=dag,

@@ -110,7 +110,7 @@ def run_test_on_fun(fn: Callable[[], Coroutine[None, None, None]], **kw: Any) ->
     with ExitStack() as st:
         exts = main.get_extensions()
         st.enter_context(exts.app_context())
-        t = mod.task_from_function(fn, **kw)
+        t = mod.create_task_from_function(fn, **kw)
         dag = TaskDAG('Test')
         dag.add_task(t)
         graph = dag.low_level_graph([t.name])

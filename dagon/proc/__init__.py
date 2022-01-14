@@ -530,13 +530,7 @@ async def run(cmd: CommandLine,
     return result
 
 
-def define_cmd_task(name: str,
-                    cmd: CommandLine,
-                    *,
-                    dag: TaskDAG | None = None,
-                    cwd: Pathish | None = None,
-                    doc: str = '',
-                    on_output: LineHandler | OutputMode | None = 'accumulate',
+def cmd_task(name: str,
                     print_output_on_finish: bool | None = None,
                     check: bool = True,
                     default: bool = False,
