@@ -162,7 +162,6 @@ def _main(argv: Sequence[str], exts: ExtLoader) -> int:
         action='store_true',
     )
     args = cast(MainArgParseResults, parser.parse_args(argv))
-    exts.handle_options(cast(argparse.Namespace, args))
 
     if args.version:
         version = pkg_resources.get_distribution('dagon').version
@@ -207,6 +206,8 @@ def _main(argv: Sequence[str], exts: ExtLoader) -> int:
     finally:
         _g_loading_dag = False
         sys.path = prev_path
+
+    exts.handle_options(cast(argparse.Namespace, args))
     return run_with_args(dag, exts, args, default_tasks=[])
 
 

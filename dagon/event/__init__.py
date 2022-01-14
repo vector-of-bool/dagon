@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager, contextmanager
 import contextvars
-from typing import Any, AsyncIterator, Callable, Iterator, Type, overload
+from typing import Any, AsyncIterator, Callable, Iterator
 
 from ..ext.base import BaseExtension
 from ..ext.iface import OpaqueTaskGraphView
