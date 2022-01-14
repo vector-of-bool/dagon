@@ -114,7 +114,7 @@ def run_test_on_fun(fn: Callable[[], Coroutine[None, None, None]], **kw: Any) ->
         dag = TaskDAG('Test')
         dag.add_task(t)
         graph = dag.low_level_graph([t.name])
-        results = ExtAwareExecutor(exts, graph, catch_signals=False).run_all_until_complete()
+        results = ExtAwareExecutor(exts, graph, catch_signals=False, fail_cancels=True).run_all_until_complete()
         for f in results.values():
             if isinstance(f.result, Failure):
                 f.result.reraise()

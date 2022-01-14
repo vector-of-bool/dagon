@@ -277,7 +277,7 @@ of execution. If multiple tasks fail then all exceptions will be printed::
     AttributeError: 'module <dagon.ui>' object has no attribute 'pront'
 
 .. hint::
-    If you pass ``--eager-fail-stop`` on the command line then a failing task
+    If you pass ``--fail-cancels-stop`` on the command line then a failing task
     will cause Dagon to send a cancellation event to other executing tasks. This
     can be useful to save time and compute resources if the result of a
     long-running task would be discarded in the case that a smaller up-front

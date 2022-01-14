@@ -10,6 +10,8 @@ from types import FrameType
 from typing import (TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping, NamedTuple,
                     Sequence, TypeVar, cast, overload)
 
+from dagon.core.result import Failure
+
 from ..core import LowLevelDAG, NodeResult, Success, exec
 from ..util import (NoneSuch, Opaque, first, nearest_matching, scope_set_contextvar)
 from .task import DisabledTaskError, InvalidTask, Task
@@ -105,7 +107,7 @@ class TaskDAG:
                         *,
                         exec_fn: Callable[[Task[T]], Awaitable[T]] = default_execute) -> exec.SimpleExecutor[Task[Any]]:
         graph = self.low_level_graph(marks)
-        return TaskExecutor[Opaque](graph, exec_fn=exec_fn, catch_signals=True)
+        return TaskExecutor[Opaque](graph, exec_fn=exec_fn, catch_signals=True, fail_cancels=True)
 
     async def execute(
             self,
@@ -176,10 +178,12 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
     A DAG executor that executes task objects and allows the results of tasks
     to be shared between each other using the `.result_of` function.
     """
-    def __init__(self, graph: LowLevelDAG[Task[T]], exec_fn: Callable[[Task[T]], Awaitable[T]], catch_signals: bool):
+    def __init__(self, graph: LowLevelDAG[Task[T]], exec_fn: Callable[[Task[T]], Awaitable[T]], *, catch_signals: bool,
+                 fail_cancels: bool):
         super().__init__(graph, exec_fn)
         self.__graph = graph
         self.__catch_signals = catch_signals
+        self.__fail_cancels = fail_cancels
 
     @property
     def graph(self):
@@ -225,8 +229,14 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
         allow result sharing between tasks. Calls `.do_run_task` to execute
         the task within the scope that allows for result sharing.
         """
+        from ..event import CancellationToken
         with scope_set_contextvar(_CTX_EXEC, _ExecCtx(self, node)):
-            return await self.do_run_task(node)
+            result = await self.do_run_task(node)
+            if isinstance(result.result, Failure) and self.__fail_cancels:
+                cancel = CancellationToken.get_context_local()
+                if cancel:
+                    cancel.cancel()
+            return result
 
     async def do_run_task(self, node: Task[T]) -> NodeResult[Task[T]]:
         return await super().do_run_node(node)
