@@ -64,7 +64,7 @@ class SimpleUI:
             self._append_stdout(msg.content + '\n')
 
     def _on_status(self, status: str) -> None:
-        self._append_stdout(f'[status] {status}')
+        self._append_stdout(status)
 
     def _echo_proc(self, result: ProcessResultUIInfo) -> None:
         for m in make_proc_info_box(result, max_width=ansi.get_term_width()):
@@ -88,6 +88,7 @@ class SimpleUI:
                 prefix = b'[dagon]'
             l = prefix + l
             into.write(l.decode(encoding='utf-8', errors='?'))
+        into.flush()
 
 
 if TYPE_CHECKING:
