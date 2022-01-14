@@ -337,14 +337,18 @@ def _record_proc(db: db_mod.Database, task_run_id: db_mod.TaskRunID, cmd: Sequen
     db.set_interval_end(iv, end_time)
 
 
-def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool, print_output_on_finish: bool,
-               result: ProcessResult, proc: RunningProcess, next_handler: ProcessCompletionCallback) -> None:
+_PrintOnFinishArg = Literal['always', 'never', 'on-fail', None]
+
+
+def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool,
+               print_output_on_finish: _PrintOnFinishArg, result: ProcessResult, proc: RunningProcess,
+               next_handler: ProcessCompletionCallback) -> None:
     gctx = db_mod.global_context_data()
     tctx = db_mod.task_context_data()
     if record and gctx and tctx:
         # Store this process execution in the database
         _record_proc(gctx.database, tctx.task_run_id, cmd, start_time, cwd, result)
-    if print_output_on_finish:
+    if (print_output_on_finish == 'always' or (print_output_on_finish == 'on-fail' and result.retcode != 0)):
         ui.process_done(ui.ProcessResultUIInfo(cmd, result.retcode, result.output))
     next_handler(proc, result)
 
@@ -357,7 +361,7 @@ async def spawn(cmd: CommandLine,
                 stdin_pipe: bool = False,
                 on_output: OutputMode | LineHandler | None = None,
                 on_done: ProcessCompletionCallback | None = None,
-                print_output_on_finish: bool | None = None,
+                print_output_on_finish: _PrintOnFinishArg = None,
                 record: bool = True,
                 cancel: CancellationToken | None = None,
                 timeout: datetime.timedelta | None = None) -> RunningProcess:
@@ -426,7 +430,10 @@ async def spawn(cmd: CommandLine,
     start_time = datetime.datetime.now()
     cwd_ = cwd
     if print_output_on_finish is None:
-        print_output_on_finish = on_output == 'accumulate'
+        if on_output == 'accumulate':
+            print_output_on_finish = 'always'
+        else:
+            print_output_on_finish = 'on-fail'
     # Call _proc_done when the process completes
     on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, record, print_output_on_finish, p1, p0,
                                         prev_on_done)
@@ -485,7 +492,7 @@ async def run(cmd: CommandLine,
               check: bool = True,
               on_output: LineHandler | OutputMode | None = None,
               on_done: ProcessCompletionCallback | None = None,
-              print_output_on_finish: bool | None = None,
+              print_output_on_finish: _PrintOnFinishArg = None,
               record: bool = True,
               cancel: CancellationToken | None = None,
               timeout: datetime.timedelta | None = None) -> ProcessResult:
@@ -531,13 +538,19 @@ async def run(cmd: CommandLine,
 
 
 def cmd_task(name: str,
-                    print_output_on_finish: bool | None = None,
-                    check: bool = True,
-                    default: bool = False,
-                    depends: DependsArg = (),
-                    env: dict[str, str] | None = None,
-                    order_only_depends: DependsArg = (),
-                    disabled_reason: str | None = None) -> Task[ProcessResult]:
+             cmd: CommandLine,
+             *,
+             dag: TaskDAG | None = None,
+             cwd: Pathish | None = None,
+             doc: str = '',
+             on_output: LineHandler | OutputMode | None = 'accumulate',
+             print_output_on_finish: _PrintOnFinishArg = None,
+             check: bool = True,
+             default: bool = False,
+             depends: DependsArg = (),
+             env: dict[str, str] | None = None,
+             order_only_depends: DependsArg = (),
+             disabled_reason: str | None = None) -> Task[ProcessResult]:
     """
     Declare a task that executes the given command. See
     :func:`dagon.task.define` and :func:`run` for parameter information.
