@@ -11,10 +11,13 @@ def get_mem_db() -> mod.Database:
     return mod.Database.get_or_create(':memory:')
 
 
+# Mark tests as asyncio to ensure there is a thread loop for the database
+@pytest.mark.asyncio
 def test_create() -> None:
     mod.get_ready_sqlite_db(':memory:')
 
 
+@pytest.mark.asyncio
 def test_get_existing() -> None:
     test_db_s = 'foo.db'
     test_db = Path(test_db_s)
@@ -42,6 +45,7 @@ def test_get_existing() -> None:
         assert e.expected_version == mod.schema_hash()
 
 
+@pytest.mark.asyncio
 def test_new_run_id() -> None:
     db = get_mem_db()
     run_id = db.new_run_id()
@@ -50,6 +54,7 @@ def test_new_run_id() -> None:
     assert run_id_2 == 2
 
 
+@pytest.mark.asyncio
 def test_persist() -> None:
     db = get_mem_db()
     assert db.load_persist('foo', None) is mod.Undefined
@@ -57,6 +62,7 @@ def test_persist() -> None:
     assert db.load_persist('foo', None) == 12
 
 
+@pytest.mark.asyncio
 def test_task_events() -> None:
     db = get_mem_db()
     run = db.new_run_id()
@@ -65,6 +71,7 @@ def test_task_events() -> None:
     db.store_task_event(trun_id, 'start')
 
 
+@pytest.mark.asyncio
 def test_store_proc_exec() -> None:
     db = get_mem_db()
     run = db.new_run_id()
