@@ -94,16 +94,8 @@ class EventMap:
         """Determine whether there is an event `name`"""
         return name in self._events
 
-    @contextmanager
-    def child(self) -> Iterator[EventMap]:
-        with ExitStack() as st:
-            more_events = {
-                k: Event[Any]()
-                for k in self._events.keys()
-            }
-            for k in more_events:
-                st.enter_context(self._events[k].connect(more_events[k].emit))
-            yield EventMap(events=more_events)
+    def child(self) -> EventMap:
+        return EventMap(events=dict(self._events))
 
     def register(self, name: str, event: Event[T]) -> Event[T]:
         """

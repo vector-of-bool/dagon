@@ -62,21 +62,21 @@ class _EventsExt(BaseExtension[None, EventMap, EventMap]):
 
     @asynccontextmanager
     async def global_context(self, graph: OpaqueTaskGraphView) -> AsyncIterator[EventMap]:
-        map = EventMap()
         prev = _EVENTS_CTX.get()
-        with prev.child() as map:
-            with scope_set_contextvar(_EVENTS_CTX, map):
-                with CancellationToken.ensure_context_local():
-                    yield map
+        map = prev.child()
+        with scope_set_contextvar(_EVENTS_CTX, map):
+            with CancellationToken.ensure_context_local():
+                yield map
 
     @asynccontextmanager
     async def task_context(self, task: OpaqueTask) -> AsyncIterator[EventMap]:
-        with self.global_data().child() as map:
-            with scope_set_contextvar(_EVENTS_CTX, map):
-                map.register('dagon.interval-start', Event[str]())
-                map.register('dagon.interval-end', Event[None]())
-                map.register('dagon.mark', Event[None]())
-                yield map
+        glb = self.global_data()
+        child = glb.child()
+        with scope_set_contextvar(_EVENTS_CTX, child):
+            child.register('dagon.interval-start', Event[str]())
+            child.register('dagon.interval-end', Event[None]())
+            child.register('dagon.mark', Event[None]())
+            yield child
 
 
 class _EventsContextLookup:
