@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import enum
 
+import pytest
+
 from dagon import option, task
+from dagon.option.ext import NoOptionValueError
 from dagon.util import unused
 
 from tests.test_util import dag_test
@@ -35,11 +38,16 @@ def test_opts():
 
 @dag_test([])
 def test_opt_default():
-    opt = option.add('foo', int, default=None)
+    opt_with_default = option.add('foo', int, default=None)
+    opt_wo_default = option.add('bar', int)
 
     @task.define(default=True)
     async def meow():
-        assert opt.get() == None
+        assert opt_with_default.get() == None
+        with pytest.raises(NoOptionValueError):
+            opt_wo_default.get()
+        v = opt_wo_default.get(default=12)
+        assert v == 12
 
     unused(meow)
 

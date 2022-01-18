@@ -14,7 +14,7 @@ import dagon.tool.args
 from typing_extensions import Final
 
 from ..ext.base import BaseExtension
-from ..util import T, Undefined, UndefinedType, first
+from ..util import T, U, Undefined, UndefinedType, first
 from .option import NoSuchOptionError, Option
 
 _NO_VALUE: Final = object()
@@ -40,10 +40,18 @@ class FulfilledOptions:
         ...
 
     @overload
+    def get(self, option: str, *, default: Any) -> Any:
+        ...
+
+    @overload
     def get(self, option: Option[T]) -> T:
         ...
 
-    def get(self, option: Option[T] | str) -> T:
+    @overload
+    def get(self, option: Option[T], *, default: U) -> T | U:
+        ...
+
+    def get(self, option: Option[T] | str, default: Any = _NO_VALUE) -> T:
         """
         Get the value of the given option.
 
@@ -59,6 +67,8 @@ class FulfilledOptions:
             raise KeyError(f'No known option "{option.name}"')
         mine = self._values[option]
         if mine is _NO_VALUE:
+            if default is not _NO_VALUE:
+                return default
             raise NoOptionValueError(
                 f'No value was provided for option "{option.name}", and no default value was specified')
         return cast(T, mine)

@@ -10,7 +10,7 @@ from typing import (Any, Callable, Generic, Mapping, Type, TypeVar, Union, cast,
 
 from typing_extensions import Protocol
 
-from ..util import T, Undefined, UndefinedType
+from ..util import T, U, Undefined, UndefinedType
 
 
 class _CustomDagonOpt(Protocol):
@@ -169,7 +169,15 @@ class Option(Generic[T]):
         """Documentation for this option"""
         return self._doc
 
+    @overload
     def get(self) -> T:
+        ...
+
+    @overload
+    def get(self, *, default: U) -> T | U:
+        ...
+
+    def get(self, **kw: Any) -> T:
         """
         Obtain the value that was given to this option.
 
@@ -177,7 +185,7 @@ class Option(Generic[T]):
             This method may only be called from within a task-executing context!
         """
         from dagon.option.ext import ctx_fulfilled_options
-        return ctx_fulfilled_options().get(self)
+        return ctx_fulfilled_options().get(self, **kw)
 
     @property
     def type(self) -> Type[T] | UndefinedType:

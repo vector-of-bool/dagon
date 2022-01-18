@@ -97,15 +97,15 @@ def add(name: str,
 
 
 @overload
-def value_of(opt: Option[T]) -> T:
+def value_of(opt: Option[T], *, default: U = ...) -> T | U:
     ...
 
 
 @overload
-def value_of(opt: str) -> Any:
+def value_of(opt: str, *, default: Any = ...) -> Any:
     ...
 
 
-def value_of(opt: Option[T] | str) -> T | None:
+def value_of(opt: Option[T] | str, **kw: Any) -> T | None:
     """Obtain the value of the specified option"""
-    return ctx_fulfilled_options().get(opt)
+    return ctx_fulfilled_options().get(opt, **kw)
