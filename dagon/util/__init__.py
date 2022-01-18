@@ -6,6 +6,7 @@ General utilities
 """
 from __future__ import annotations
 
+import enum
 import contextvars
 import difflib
 import sqlite3
@@ -24,22 +25,17 @@ U = TypeVar('U')
 "A second generic invariant type variable"
 
 
-class UndefinedType:
+class UndefinedType(enum.Enum):
     """
     The type of the generic :const:`Undefined` constant.
     """
-    _inst: UndefinedType | None = None
-
-    def __new__(cls) -> UndefinedType:
-        if cls._inst is None:
-            cls._inst = super().__new__(cls)
-        return cls._inst
+    Undefined = 0
 
     def __repr__(self) -> str:
         return 'Undefined'
 
 
-Undefined = UndefinedType()
+Undefined = UndefinedType.Undefined
 """
 An 'undefined' constant to be used to represent the absence of parameter/return
 values where `None` is within the domain of that parameter or return value.

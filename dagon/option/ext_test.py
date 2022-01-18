@@ -1,6 +1,8 @@
 import enum
-from . import ext as mod
+
 import pytest
+
+from . import ext as mod
 
 
 class MyEnum(enum.Enum):
@@ -10,15 +12,20 @@ class MyEnum(enum.Enum):
 
 def test_option_set() -> None:
     s = mod.OptionSet()
-    opt = mod.Option('key', int)
+    opt = mod.Option('key', type=int, parse=int)
     s.add(opt)
     assert s.get('key') is opt
 
 
 def test_fulfill() -> None:
     s = mod.OptionSet()
-    name = s.add(mod.Option('name', str))
-    age = s.add(mod.Option('age', int, validate=lambda i: 'Must be a positive number' if i < 0 else None))
+    name = s.add(mod.Option('name', type=str, parse=str))
+    age = s.add(
+        mod.Option('age',
+                   type=int,
+                   parse=int,
+                   default=None,
+                   validate=lambda i: 'Must be a positive number' if i and i < 0 else None))
     # Invalid option name:
     with pytest.raises(NameError):
         s.fulfill(('invalid=12', ))
@@ -38,7 +45,7 @@ def test_fulfill() -> None:
     assert ff.get(age) is None
 
     # Add a default value
-    loc = s.add(mod.Option('loc', str, default='The moon'))
+    loc = s.add(mod.Option('loc', type=str, parse=str, default='The moon'))
     ff = s.fulfill(['name=Joe=equals'])
     assert ff.get(name) == 'Joe=equals'
     assert ff.get(loc) == 'The moon'
@@ -47,7 +54,7 @@ def test_fulfill() -> None:
     assert ff.get('name') == 'Joe=equals'
 
     # Enum options
-    some_value = s.add(mod.Option('something', MyEnum))
+    some_value = s.add(mod.Option('something', type=MyEnum, parse=MyEnum))
     with pytest.raises(ValueError):
         s.fulfill(['something=Dogs'])
     ff = s.fulfill(['something=cat'])

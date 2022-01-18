@@ -42,37 +42,62 @@ option at runtime.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Type, overload
+from typing import Any, Callable, Type, TypeVar, cast, overload
 
-from dagon.util import Undefined
-
+from ..util import T, U
 from .ext import ctx_fulfilled_options, ctx_option_set
-from .option import Option, OptionDefaultArg, OptionT
+from .option import Option, SimpleOptionType, get_type_parser
 
-__all__ = [
-    'Option',
-    'OptionT',
-    'OptionDefaultArg',
-    'add',
-    'value_of',
-]
+__all__ = ['Option', 'add', 'value_of']
+
+SimpleT = TypeVar('SimpleT', bound=SimpleOptionType)
+
+
+@overload
+def add(name: str,
+        type: Type[SimpleT],
+        *,
+        doc: str = '',
+        validate: Callable[[SimpleT], str | None] | None = None,
+        default: U | Callable[[str], U] = ...) -> Option[SimpleT | U]:
+    ...
+
+
+@overload
+def add(name: str,
+        type: Type[T] = ...,
+        *,
+        doc: str = '',
+        parse: Callable[[str], T],
+        default: U | Callable[[str], U] = ...) -> Option[T | U]:
+    ...
 
 
 def add(name: str,
-        typ: Type[OptionT],
+        type: Type[T] | None = None,
         *,
-        default: OptionDefaultArg[OptionT] = Undefined,
+        parse: Callable[[str], T] | None = None,
         doc: str = '',
-        validate: Callable[[OptionT], str | None] | None = None) -> Option[OptionT]:
+        validate: Callable[[Any], str | None] | None = None,
+        **kwargs: Any) -> Option[Any]:
     """
     Add an option to the current task graph with the given name and type.
     """
     oset = ctx_option_set()
-    return oset.add(Option(name, typ, default=default, doc=doc, validate=validate))
+    if type is not None:
+        parse = get_type_parser(cast(Type[SimpleOptionType], type))
+    assert parse, 'option.add requires a "parse" function or a supported "type"'
+    if 'default' not in kwargs:
+        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate))
+    d: Any = kwargs.pop('default')
+    if callable(d):
+        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate, calc_default=d))
+    else:
+        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate, default=d))
 
 
 @overload
-def value_of(opt: Option[OptionT]) -> OptionT | None:
+def value_of(opt: Option[T]) -> T:
     ...
 
 
@@ -81,6 +106,6 @@ def value_of(opt: str) -> Any:
     ...
 
 
-def value_of(opt: Option[OptionT] | str) -> OptionT | None:
+def value_of(opt: Option[T] | str) -> T | None:
     """Obtain the value of the specified option"""
     return ctx_fulfilled_options().get(opt)

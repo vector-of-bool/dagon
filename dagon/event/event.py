@@ -1,9 +1,8 @@
 from __future__ import annotations
-from contextlib import ExitStack, contextmanager
 
 import traceback
 import warnings
-from typing import Any, Callable, Dict, Generic, Iterator, Mapping, NamedTuple
+from typing import Any, Callable, Dict, Generic, Mapping, NamedTuple
 
 from ..util import T, unused
 

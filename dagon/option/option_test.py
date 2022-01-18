@@ -7,7 +7,7 @@ from . import option as mod
 
 
 def test_simple_option() -> None:
-    mod.Option('foo', int)
+    mod.Option('foo', type=int, parse=int)
 
 
 def test_bool() -> None:

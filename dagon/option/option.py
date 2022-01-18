@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import enum
 from pathlib import Path
-from typing import (Any, Callable, Generic, Mapping, Type, TypeVar, Union, cast)
+from typing import (Any, Callable, Generic, Mapping, Type, TypeVar, Union, cast, overload)
+
 from typing_extensions import Protocol
 
-from dagon.util import Undefined, UndefinedType
+from ..util import T, Undefined, UndefinedType
 
 
 class _CustomDagonOpt(Protocol):
@@ -18,9 +19,8 @@ class _CustomDagonOpt(Protocol):
         ...
 
 
-OptionType = Union[str, bool, Path, int, float, enum.Enum, _CustomDagonOpt]
-
-OptionT = TypeVar('OptionT', bound=OptionType)
+SimpleOptionType = Union[str, bool, Path, int, float, enum.Enum, _CustomDagonOpt]
+SimpleOptionT = TypeVar('SimpleOptionT', bound=SimpleOptionType)
 
 
 def convert_bool(s: str) -> bool:
@@ -64,7 +64,7 @@ def is_valid_option_type(typ: Type[Any]) -> bool:
     return hasattr(typ, _PARSE_OPT_METHOD_KEY) or issubclass(typ, enum.Enum) or (typ in _CONVERSION_MAP)
 
 
-def parse_value_str(typ: Type[OptionT], val_str: str) -> OptionT:
+def parse_value_str(typ: Type[SimpleOptionT], val_str: str) -> SimpleOptionT:
     """
     Given a type `typ` and a value string `val_str`, attempt to convert
     that string to the given `typ`. Raises `ValueError` in cases of
@@ -74,27 +74,27 @@ def parse_value_str(typ: Type[OptionT], val_str: str) -> OptionT:
         conv = getattr(type, _PARSE_OPT_METHOD_KEY, None)
         if conv is not None:
             assert callable(conv)
-            return cast(OptionT, conv(val_str))  # pylint: disable=not-callable
+            return cast(SimpleOptionT, conv(val_str))  # pylint: disable=not-callable
         if issubclass(typ, enum.Enum):
             try:
-                return cast(OptionT, typ(val_str))
+                return cast(SimpleOptionT, typ(val_str))
             except ValueError as e:
                 try:
                     i = int(val_str)
                 except ValueError:
                     raise e from e
                 else:
-                    return cast(OptionT, typ(i))
-        return cast(OptionT, _CONVERSION_MAP[typ](val_str))
+                    return cast(SimpleOptionT, typ(i))
+        return cast(SimpleOptionT, _CONVERSION_MAP[typ](val_str))
     except Exception as e:
         raise ValueError(f'Failed to parse "{val_str}" as type `{typ.__name__}`') from e
 
 
-OptionDefaultArg = Union[OptionT, Callable[[], OptionT], UndefinedType]
-'The type of the `Option` `default` argument'
+def get_type_parser(typ: Type[SimpleOptionT]) -> Callable[[str], SimpleOptionT]:
+    return lambda s: parse_value_str(typ, s)
 
 
-class Option(Generic[OptionT]):
+class Option(Generic[T]):
     """
     Representation of a run-time execution option that can be provided by a
     user.
@@ -109,20 +109,55 @@ class Option(Generic[OptionT]):
         value is valid for this option. Should return `None` when the value
         is valid, or an error string explaining why it is an invalid value.
     """
+    @overload
     def __init__(self,
                  name: str,
-                 typ: Type[OptionT],
                  *,
-                 default: OptionDefaultArg[OptionT] = Undefined,
+                 type: Type[T] | UndefinedType,
+                 parse: Callable[[str], T],
                  doc: str | None = None,
-                 validate: Callable[[OptionT], str | None] | None = None) -> None:
-        if not is_valid_option_type(typ):
-            raise TypeError(f'Type {repr(type)} is not a valid option type')
+                 validate: Callable[[T], str | None] | None = None) -> None:
+        ...
+
+    @overload
+    def __init__(self,
+                 name: str,
+                 *,
+                 type: Type[T] | UndefinedType,
+                 parse: Callable[[str], T],
+                 default: T = ...,
+                 doc: str | None = None,
+                 validate: Callable[[T], str | None] | None = None) -> None:
+        ...
+
+    @overload
+    def __init__(self,
+                 name: str,
+                 *,
+                 type: Type[T] | UndefinedType,
+                 parse: Callable[[str], T],
+                 calc_default: Callable[[], T] = ...,
+                 doc: str | None = None,
+                 validate: Callable[[T], str | None] | None = None) -> None:
+        ...
+
+    def __init__(self,
+                 name: str,
+                 *,
+                 type: Type[T] | UndefinedType = Undefined,
+                 parse: Callable[[str], T],
+                 calc_default: Callable[[], T] | None = None,
+                 doc: str | None = None,
+                 validate: Callable[[T], str | None] | None = None,
+                 **kwargs: Any) -> None:
         self._name = name
-        self._type = typ
-        self._default = default
+        self._parser = parse
+        self._type = type
+        self._calc_default = calc_default
         self._validate = validate
         self._doc = doc
+        self._has_default = 'default' in kwargs
+        self._default: T | UndefinedType = kwargs.pop('default', Undefined)
 
     @property
     def name(self) -> str:
@@ -130,16 +165,11 @@ class Option(Generic[OptionT]):
         return self._name
 
     @property
-    def type(self) -> Type[OptionT]:
-        """The type of this option"""
-        return self._type
-
-    @property
     def doc(self) -> str | None:
         """Documentation for this option"""
         return self._doc
 
-    def get(self) -> OptionT | None:
+    def get(self) -> T:
         """
         Obtain the value that was given to this option.
 
@@ -149,19 +179,25 @@ class Option(Generic[OptionT]):
         from dagon.option.ext import ctx_fulfilled_options
         return ctx_fulfilled_options().get(self)
 
-    def get_default(self) -> OptionT | UndefinedType:
+    @property
+    def type(self) -> Type[T] | UndefinedType:
+        return self._type
+
+    @property
+    def has_default(self):
+        """Whether the option has a default value provided"""
+        return self._has_default
+
+    def get_default(self) -> T:
         """
         Get the default value associated with this option, or :data:`Undefined`
         if no default is provided.
         """
-        if self._default is Undefined:
-            return Undefined
+        if self._calc_default is not None:
+            return self._calc_default()
+        return cast(T, self._default)
 
-        if callable(self._default):
-            return self._default()
-        return self._default
-
-    def validate(self, value: OptionT) -> str | None:
+    def validate(self, value: T) -> str | None:
         """
         Check if the given value is valid for this option.
 
@@ -181,9 +217,9 @@ class Option(Generic[OptionT]):
     def __repr__(self) -> str:
         return f'<dagon.option.Option "{self.name}">'
 
-    def parse_str(self, val_str: str) -> OptionT:
+    def parse_str(self, val_str: str) -> T:
         """
         Parse the given string into a value for this option. Does not perform
         additional validation.
         """
-        return parse_value_str(self.type, val_str)
+        return self._parser(val_str)

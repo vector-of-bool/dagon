@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import enum
-from dagon import task, option
+
+from dagon import option, task
 from dagon.util import unused
+
 from tests.test_util import dag_test
 
 
@@ -33,7 +35,7 @@ def test_opts():
 
 @dag_test([])
 def test_opt_default():
-    opt = option.add('foo', int)
+    opt = option.add('foo', int, default=None)
 
     @task.define(default=True)
     async def meow():

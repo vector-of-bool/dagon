@@ -7,13 +7,21 @@ import sys
 import textwrap
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, ContextManager, Iterable, Sequence, Type, cast
+from inspect import isclass
+from typing import (Any, ContextManager, Iterable, Sequence, Type, cast, overload)
 
 import dagon.tool.args
+from typing_extensions import Final
 
 from ..ext.base import BaseExtension
-from .option import Option, OptionT, NoSuchOptionError
-from ..util import first, Undefined
+from ..util import T, Undefined, UndefinedType, first
+from .option import NoSuchOptionError, Option
+
+_NO_VALUE: Final = object()
+
+
+class NoOptionValueError(ValueError):
+    pass
 
 
 class FulfilledOptions:
@@ -27,7 +35,15 @@ class FulfilledOptions:
     def __init__(self, values: Iterable[tuple[Option[Any], Any]]):
         self._values = dict(values)
 
-    def get(self, option: Option[OptionT] | str) -> OptionT | None:
+    @overload
+    def get(self, option: str) -> Any:
+        ...
+
+    @overload
+    def get(self, option: Option[T]) -> T:
+        ...
+
+    def get(self, option: Option[T] | str) -> T:
         """
         Get the value of the given option.
 
@@ -39,12 +55,13 @@ class FulfilledOptions:
             if found is None:
                 raise KeyError(f'No option with name "{option}"')
             option = found
-        mine = self._values.get(option)
-        if mine is None:
+        if not option in self._values:
             raise KeyError(f'No known option "{option.name}"')
-        if mine is Undefined:
-            return None
-        return cast(OptionT, mine)
+        mine = self._values[option]
+        if mine is _NO_VALUE:
+            raise NoOptionValueError(
+                f'No value was provided for option "{option.name}", and no default value was specified')
+        return cast(T, mine)
 
 
 class OptionSet:
@@ -58,7 +75,7 @@ class OptionSet:
         for o in options:
             self.add(o)
 
-    def add(self, opt: Option[OptionT]) -> Option[OptionT]:
+    def add(self, opt: Option[T]) -> Option[T]:
         """
         Register the given option with this set. Returns the given option.
 
@@ -101,7 +118,10 @@ class OptionSet:
 
         for k in all_keys:
             opt = self._options[k]
-            yield opt, opt.get_default()
+            if opt.has_default:
+                yield opt, opt.get_default()
+            else:
+                yield opt, _NO_VALUE
 
     def fulfill(self, kvs: Iterable[str]) -> FulfilledOptions:
         """
@@ -145,7 +165,10 @@ def _format_docstr(s: str) -> Iterable[str]:
         yield ''  # Empty line after paragraph
 
 
-def _option_help_annot(t: Type[Any]) -> str:
+def _option_help_annot(t: Type[Any] | UndefinedType) -> str:
+    if t is Undefined:
+        return '[no type]'
+    assert isclass(t), t
     if issubclass(t, enum.Enum):
         return f'{t.__name__} {{' + ', '.join(str(f.value) for f in t) + '}'
     return t.__name__
