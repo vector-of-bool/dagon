@@ -466,7 +466,7 @@ async def spawn(cmd: CommandLine,
 
 class _UpdateStatus:
     def __call__(self, line: ProcessOutputItem) -> None:
-        ui.status(line.out.decode(errors='?'))
+        ui.status(line.out.decode(errors='?').strip())
 
 
 class _LogLine:
