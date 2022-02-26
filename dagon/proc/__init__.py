@@ -471,7 +471,10 @@ class _UpdateStatus:
 
 class _LogLine:
     def __call__(self, line: ProcessOutputItem) -> None:
-        ui.print(line.out.decode(errors='?'), type=MessageType.Error if line.kind == 'error' else MessageType.Print)
+        data = line.out
+        if data.endswith(OS_PREFERRED_NEWLINE):
+            data = data[:-len(OS_PREFERRED_NEWLINE)]
+        ui.print(data.decode(errors='?'), type=MessageType.Error if line.kind == 'error' else MessageType.Print)
 
 
 PRINT_OUTPUT: LineHandler = _LogLine()
