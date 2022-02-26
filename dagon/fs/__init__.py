@@ -113,6 +113,15 @@ def _copy_file_no_overwrite(src: Path, dst: Path) -> None:
             shutil.copyfileobj(f, out)
 
 
+def _any_parent_is_file(p: Path) -> bool:
+    "Determine whether 'p' (or any ancestor of 'p') names a file"
+    if p.is_dir():
+        return False
+    if p.is_file():
+        return True
+    return _any_parent_is_file(p.parent)
+
+
 @_thread_pooled
 def copy_file(file: Pathish,
               dest: Pathish,
@@ -155,6 +164,16 @@ def copy_file(file: Pathish,
         do_copy = _copy_file_no_overwrite
     try:
         do_copy(file, dest)
+    except FileNotFoundError as e:
+        # Windows might not raise NotADirectoryError itself, so we'll check that
+        # case ourselves
+        if _any_parent_is_file(dest):
+            raise NotADirectoryError from e
+        raise
+    except PermissionError as e:
+        if file.is_dir():
+            raise IsADirectoryError from e
+        raise
     except FileExistsError:
         if if_exists == 'fail':
             raise

@@ -12,6 +12,7 @@ repository = "https://github.com/vector-of-bool/dagon"
 [tool.poetry.dependencies]
 python = "^3.7"
 typing-extensions = "^4.0.1"
+importlib-metadata = { "version" = "*", python = "<3.10" }
 
 [tool.poetry.scripts]
 dagon = "dagon.tool.main:start"
