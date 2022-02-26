@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dagon"
-version = "0.9.2"
+version = "0.9.3"
 description = "An asynchronous task graph execution system"
 authors = ["vector-of-bool <vectorofbool@gmail.com>"]
 packages = [

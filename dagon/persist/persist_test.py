@@ -12,7 +12,8 @@ def db() -> db_mod.Database:
     return db_mod.Database.get_or_create(':memory:')
 
 
-def test_persist_global(db: db_mod.Database) -> None:
+@pytest.mark.asyncio
+async def test_persist_global(db: db_mod.Database) -> None:
     with mod.set_global_persistor(mod.DatabasePersistor(db, None)):
         assert not mod.globl.has('eggs')
         mod.globl.set('eggs', 22)
