@@ -198,9 +198,11 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
                 st.callback(lambda: tok.set_context_local(None))
             handle_signals: list[int] = []
             if self.__catch_signals:
-                handle_signals.extend((signal.SIGINT, signal.SIGTERM, signal.SIGQUIT))
+                handle_signals.extend((signal.SIGINT, signal.SIGTERM))
                 if os.name == 'nt':
                     handle_signals.append(signal.SIGBREAK)
+                else:
+                    handle_signals.append(signal.SIGQUIT)
             st.enter_context(self._handle_signals(handle_signals, tok))
             yield
 

@@ -50,6 +50,9 @@ class ProcessOutputItem(NamedTuple):
 
 LineHandler = Callable[[ProcessOutputItem], None]
 
+_INTERRUPT_SIGNUM = signal.SIGINT if os.name != 'nt' else signal.CTRL_C_EVENT
+OS_PREFERRED_NEWLINE = b'\r\n' if os.name == 'nt' else b'\n'
+
 
 class ProcessResult(Protocol):
     """
@@ -201,7 +204,7 @@ class RunningProcess:
         if self._done:
             return
         try:
-            self.send_signal(signal.SIGINT, to_pgrp=True)
+            self.send_signal(_INTERRUPT_SIGNUM, to_pgrp=True)
         except ProcessLookupError:
             return
         else:
@@ -448,12 +451,11 @@ async def spawn(cmd: CommandLine,
     if cancel is not None:
 
         def cancel_it(_lvl: CancelLevel) -> None:
-            if os.name != 'nt':
-                try:
-                    ret.send_signal(signal.SIGINT, to_pgrp=True)
-                except ProcessLookupError:
-                    # The process is already dead. We're okay.
-                    pass
+            try:
+                ret.send_signal(_INTERRUPT_SIGNUM, to_pgrp=True)
+            except ProcessLookupError:
+                # The process is already dead. We're okay.
+                pass
             ret.mark_cancelled()
 
         token = cancel.connect(cancel_it)
