@@ -46,9 +46,9 @@ async def test_copy_file_is_dir(tmp_path: Path) -> None:
 
 def test_iter_pathish() -> None:
     assert list(fs.iter_pathish('foo')) == [Path('foo')]
-    assert list(fs.iter_pathish('foo', type=str)) == ['foo']
-    assert list(fs.iter_pathish(['foo'], type=str)) == ['foo']
-    assert list(fs.iter_pathish(['foo', 'bar'], type=str)) == ['foo', 'bar']
+    assert list(fs.iter_pathish('foo', fac=str)) == ['foo']
+    assert list(fs.iter_pathish(['foo'], fac=str)) == ['foo']
+    assert list(fs.iter_pathish(['foo', 'bar'], fac=str)) == ['foo', 'bar']
 
 
 @async_test

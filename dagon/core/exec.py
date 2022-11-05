@@ -126,7 +126,8 @@ class SimpleExecutor(Generic[NodeT]):
         Enqueue all ready tasks in the associated task graph.
         """
         nodes_to_start = list(self.__graph.ready_nodes)
-        new_tasks = set(asyncio.get_running_loop().create_task(self.do_run_node(n)) for n in nodes_to_start)
+        tasks_gen = (asyncio.get_running_loop().create_task(self.do_run_node(n)) for n in nodes_to_start)
+        new_tasks = set(tasks_gen)
         for n in nodes_to_start:
             self.__graph.mark_running(n)
         self.__running |= new_tasks
@@ -240,7 +241,7 @@ class SimpleExecutor(Generic[NodeT]):
         self.__futures = {t: asyncio.get_running_loop().create_future() for t in self.__graph.all_nodes}
         yield
 
-    def do_run_node(self, node: NodeT) -> Awaitable[NodeResult[NodeT]]:
+    async def do_run_node(self, node: NodeT) -> NodeResult[NodeT]:
         """
         Customization layer for handling node execution. Derived classes may
         override this method to intercept nodes before and after they are
@@ -257,7 +258,7 @@ class SimpleExecutor(Generic[NodeT]):
             captured at a lower layer and enclosed in a `.Failure` inside of
             the `.NodeResult` returned by `.do_run_node`.
         """
-        return self._run_and_record(node)
+        return await self._run_and_record(node)
 
     async def _run_and_record(self, node: NodeT) -> NodeResult[NodeT]:
         "Run the task and capture all results"

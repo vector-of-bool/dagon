@@ -71,7 +71,7 @@ def first(items: Iterable[T], **kw: U) -> T | U:
 
 def unused(*args: Any) -> None:
     """Does nothing. Used to mark the given arguments as unused."""
-    args  # pylint: disable=pointless-statement
+    _ = args
 
 
 class NoneSuch(Generic[T]):
@@ -154,6 +154,28 @@ def scope_set_contextvar(cvar: contextvars.ContextVar[T], value: T) -> ContextMa
     return on_context_exit(lambda: cvar.reset(tok))
 
 
+def typecheck(iface: Type[T]) -> Callable[[Type[T]], Type[T]]:
+    """
+    Given a type, return a callable that accepts that type. This can be used
+    to insert type checks into modules. Should not be called at runtime: guard
+    this with a `typing.TYPE_CHECKING` condition.
+    """
+    unused(iface)
+    assert False, TypeError('typecheck() should never by called at runtime')
+    return lambda f: f  # Unreachable, but makes Pylint happy
+
+
+def typecheckv(iface: Type[T]) -> Callable[[T], T]:
+    """
+    Given a type, return a callable that accepts **a value** of that typte. This
+    can be used to insert type checks into modules. Should not be called at
+    runtime: guard this with a `typing.TYPE_CHECKING` condition.
+    """
+    unused(iface)
+    assert False, TypeError('typecheckv() should never by called at runtime')
+    return lambda f: f  # Unreachable, but makes Pylint happy
+
+
 class ReadyAwaitable(Generic[T]):
     """
     An `Awaitable` object that when awaited will immediately resolve to a given
@@ -177,23 +199,12 @@ class AsyncNullContext(Generic[T]):
     def __init__(self, value: T = None) -> None:
         self._value = value
 
-    def __aenter__(self) -> Awaitable[T]:
-        return ReadyAwaitable(self._value)
+    async def __aenter__(self) -> T:
+        return self._value
 
-    def __aexit__(self, _exc_t: Type[BaseException] | None, _exc: BaseException | None,
-                  _tb: types.TracebackType | None) -> Awaitable[None]:
-        return ReadyAwaitable(None)
-
-
-def typecheck(iface: Type[T]) -> Callable[[Type[T]], None]:
-    """
-    Given a type, return a callable that accepts that type. This can be used
-    to insert type checks into modules. Should not be called at runtime: guard
-    this with a `typing.TYPE_CHECKING` condition.
-    """
-    unused(iface)
-    assert False, TypeError('typecheck() should never by called at runtime')
-    return lambda f: None  # Unreachable, but makes Pylint happy
+    async def __aexit__(self, _exc_t: Type[BaseException] | None, _exc: BaseException | None,
+                        _tb: types.TracebackType | None) -> None:
+        return None
 
 
 if TYPE_CHECKING:

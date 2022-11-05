@@ -6,7 +6,7 @@ import builtins
 import argparse
 import warnings
 from contextlib import AsyncExitStack, ExitStack, asynccontextmanager
-from typing import Any, AsyncIterator, Awaitable
+from typing import Any, AsyncIterator, Awaitable, cast
 
 from dagon.core.result import NodeResult
 from dagon.ext import loader
@@ -67,7 +67,7 @@ class _Ext(BaseExtension[None, I_UIExtension, None]):
     def _try_load_one(ep: EntryPoint) -> None | I_UIExtension:
         ep_name: str = getattr(ep, 'name', '<unnamed>')
         try:
-            cls: Opaque = ep.load()
+            cls: Opaque = cast(Opaque, ep.load())
         except BaseException as e:
             warnings.warn(f"An exception occurred while trying to load Dagon UI extension {ep!r}: {e}",
                           UILoadWarning,

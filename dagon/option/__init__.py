@@ -43,6 +43,7 @@ option at runtime.
 from __future__ import annotations
 
 from typing import Any, Callable, Type, TypeVar, cast, overload
+from typing_extensions import Final
 
 from ..util import T, U
 from .ext import ctx_fulfilled_options, ctx_option_set
@@ -58,8 +59,37 @@ def add(name: str,
         type: Type[SimpleT],
         *,
         doc: str = '',
+        validate: Callable[[SimpleT], str | None] | None = None) -> Option[SimpleT]:
+    ...
+
+
+@overload
+def add(name: str,
+        type: Type[SimpleT],
+        *,
+        doc: str = '',
         validate: Callable[[SimpleT], str | None] | None = None,
-        default: U | Callable[[str], U] = ...) -> Option[SimpleT | U]:
+        default: U) -> Option[SimpleT | U]:
+    ...
+
+
+@overload
+def add(name: str,
+        type: Type[SimpleT],
+        *,
+        doc: str = '',
+        validate: Callable[[SimpleT], str | None] | None = None,
+        default_factory: Callable[[], U]) -> Option[SimpleT | U]:
+    ...
+
+
+@overload
+def add(name: str, type: Type[T] = ..., *, doc: str = '', parse: Callable[[str], T]) -> Option[T]:
+    ...
+
+
+@overload
+def add(name: str, type: Type[T] = ..., *, doc: str = '', parse: Callable[[str], T], default: U) -> Option[T | U]:
     ...
 
 
@@ -69,8 +99,11 @@ def add(name: str,
         *,
         doc: str = '',
         parse: Callable[[str], T],
-        default: U | Callable[[str], U] = ...) -> Option[T | U]:
+        default_factory: Callable[[], U]) -> Option[T | U]:
     ...
+
+
+__default_sentinel: Final = object()
 
 
 def add(name: str,
@@ -79,25 +112,37 @@ def add(name: str,
         parse: Callable[[str], T] | None = None,
         doc: str = '',
         validate: Callable[[Any], str | None] | None = None,
-        **kwargs: Any) -> Option[Any]:
+        default: Any = __default_sentinel,
+        default_factory: Any = __default_sentinel) -> Option[Any]:
     """
     Add an option to the current task graph with the given name and type.
     """
     oset = ctx_option_set()
     if type is not None:
-        parse = get_type_parser(cast(Type[SimpleOptionType], type))
+        parse = cast(Callable[[str], T], get_type_parser(cast(Type[SimpleOptionType], type)))
     assert parse, 'option.add requires a "parse" function or a supported "type"'
-    if 'default' not in kwargs:
-        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate))
-    d: Any = kwargs.pop('default')
-    if callable(d):
-        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate, calc_default=d))
+    if default_factory is not __default_sentinel:
+        # The default is a callable
+        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate, calc_default=default))
+    elif default is not __default_sentinel:
+        return oset.add(Option[Any](name,
+                                    type=type,
+                                    parse=parse,
+                                    doc=doc,
+                                    validate=validate,
+                                    calc_default=lambda: default))
     else:
-        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate, default=d))
+        # No default value provided
+        return oset.add(Option[Any](name, type=type, parse=parse, doc=doc, validate=validate))
 
 
 @overload
-def value_of(opt: Option[T], *, default: U = ...) -> T | U:
+def value_of(opt: Option[T]) -> T:
+    ...
+
+
+@overload
+def value_of(opt: Option[T], *, default: U) -> T | U:
     ...
 
 
@@ -106,6 +151,6 @@ def value_of(opt: str, *, default: Any = ...) -> Any:
     ...
 
 
-def value_of(opt: Option[T] | str, **kw: Any) -> T | None:
+def value_of(opt: Option[T] | str, **kw: Any) -> T | Any:
     """Obtain the value of the specified option"""
     return ctx_fulfilled_options().get(opt, **kw)

@@ -107,7 +107,7 @@ class TaskDAG:
                         *,
                         exec_fn: Callable[[Task[T]], Awaitable[T]] = default_execute) -> exec.SimpleExecutor[Task[Any]]:
         graph = self.low_level_graph(marks)
-        return TaskExecutor[Opaque](graph, exec_fn=exec_fn, catch_signals=True, fail_cancels=True)
+        return TaskExecutor[Opaque](graph, exec_fn=cast(Any, exec_fn), catch_signals=True, fail_cancels=True)
 
     async def execute(
             self,

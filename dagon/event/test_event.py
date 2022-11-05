@@ -34,3 +34,4 @@ def test_child_map():
     child = emp.child()
     child['ev'].emit(84)
     assert r['got'] == 84
+    ev.disconnect(conn)

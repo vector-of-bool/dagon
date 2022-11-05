@@ -207,6 +207,7 @@ class _DatabaseFileStorage:
                 raise FileExistsError(fpath) from e
             raise
         file_id = c.lastrowid
+        assert file_id is not None
         fw: IFileWriter = _DatabaseFileWriter(c, file_id)
         yield fw
 
@@ -338,8 +339,8 @@ async def store_file_as(fpath: Pathish,
                         into: IFileStorage | None = None,
                         if_exists: IfExists = 'fail') -> None:
     async with AsyncExitStack() as stack:
-        into = await stack.enter_async_context(_ensure_storage(into))
-        writer = await stack.enter_async_context(into.open_file_writer(dest, if_exists=if_exists))
+        f = await stack.enter_async_context(_ensure_storage(into))
+        writer = await stack.enter_async_context(f.open_file_writer(dest, if_exists=if_exists))
         if writer is None:
             assert if_exists == 'keep', if_exists
             return
@@ -360,12 +361,11 @@ async def recover(fpath: Pathish, *, from_: IFileStorage | None = None) -> bytes
 
 async def recover_iter(fpath: Pathish, *, from_: IFileStorage | None = None) -> AsyncIterator[bytes]:
     async with AsyncExitStack() as st:
-        from_ = await st.enter_async_context(_ensure_storage(from_))
-        bufs = await st.enter_async_context(from_.read_file(fpath))
+        f = await st.enter_async_context(_ensure_storage(from_))
+        bufs = await st.enter_async_context(f.read_file(fpath))
         async for b in bufs:
             yield b
 
 
 if TYPE_CHECKING:
-    f: IFileStorage = fs
-    util.unused(f)
+    util.typecheckv(IFileStorage)(fs)

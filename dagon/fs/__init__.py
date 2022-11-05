@@ -17,7 +17,7 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from io import BufferedIOBase
 from pathlib import Path, PurePath
 from typing import (TYPE_CHECKING, Any, AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Callable, Generic,
-                    Iterable, Mapping, Type, TypeVar, Union, cast)
+                    Iterable, Mapping, TypeVar, Union, cast, overload)
 
 from typing_extensions import Literal, ParamSpec
 
@@ -77,15 +77,25 @@ def _thread_pooled(fn: Callable[_Params, T]) -> _ExecutorMappedOperation[_Params
     return r
 
 
-def iter_pathish(p: NPaths, *, type: Type[_PathT] = Path) -> Iterable[_PathT]:
+@overload
+def iter_pathish(p: NPaths) -> Iterable[Path]:
+    ...
+
+
+@overload
+def iter_pathish(p: NPaths, *, fac: Callable[[Pathish], _PathT]) -> Iterable[_PathT]:
+    ...
+
+
+def iter_pathish(p: NPaths, *, fac: Callable[[Pathish], _PathT] = Path) -> Iterable[_PathT]:
     """
     Given an iterable of paths or a single path, yield either the single path
     or each of the paths given.
     """
     if isinstance(p, (str, PurePath)) or hasattr(p, '__fspath__'):
-        yield type(p)  # type: ignore
+        yield fac(p)  # type: ignore
     else:
-        yield from (type(i) for i in p)  # type: ignore
+        yield from (fac(i) for i in p)  # type: ignore
 
 
 IfExists = Literal['replace', 'fail', 'keep']

@@ -101,9 +101,9 @@ class Option(Generic[T]):
 
     :param name: The name of the option. Should be unique in a given Dag.
     :param typ: The type of the option. Must be a subtype of `.OptionType`.
-    :param default: The default value, or a factory function that generates the
-        default value. If omitted and no value was provided by a user,
-        requesting the option's value will return `None`.
+    :param calc_default: The default value, or a factory function that generates
+        the default value. If omitted and no value was provided by a user,
+        requesting the option's value will raise an exception.
     :param doc: A documentation string to display to the user.
     :param validate: A secondary validation function that checks that a given
         value is valid for this option. Should return `None` when the value
@@ -156,7 +156,7 @@ class Option(Generic[T]):
         self._calc_default = calc_default
         self._validate = validate
         self._doc = doc
-        self._has_default = 'default' in kwargs
+        self._has_default = 'default' in kwargs or calc_default is not None
         self._default: T | UndefinedType = kwargs.pop('default', Undefined)
 
     @property
@@ -177,7 +177,7 @@ class Option(Generic[T]):
     def get(self, *, default: U) -> T | U:
         ...
 
-    def get(self, **kw: Any) -> T:
+    def get(self, **kw: Any) -> Any:
         """
         Obtain the value that was given to this option.
 

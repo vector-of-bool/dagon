@@ -16,6 +16,7 @@ import subprocess
 import sys
 import textwrap
 import traceback
+from typing_extensions import Protocol
 import warnings
 from pathlib import Path
 from typing import Iterable, NoReturn, Optional, Sequence, cast
@@ -135,7 +136,7 @@ def get_extensions() -> ExtLoader:
     return ExtLoader.default()
 
 
-class MainArgParseResults(ParsedArgs):
+class MainArgParseResults(ParsedArgs, Protocol):
     file: Optional[str]
     module: Optional[str]
     dir: Optional[Path]

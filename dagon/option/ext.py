@@ -11,7 +11,7 @@ from inspect import isclass
 from typing import (Any, ContextManager, Iterable, Sequence, Type, cast, overload)
 
 import dagon.tool.args
-from typing_extensions import Final
+from typing_extensions import Final, Protocol
 
 from ..ext.base import BaseExtension
 from ..util import T, U, Undefined, UndefinedType, first
@@ -51,7 +51,7 @@ class FulfilledOptions:
     def get(self, option: Option[T], *, default: U) -> T | U:
         ...
 
-    def get(self, option: Option[T] | str, default: Any = _NO_VALUE) -> T:
+    def get(self, option: Option[Any] | str, default: Any = _NO_VALUE) -> Any:
         """
         Get the value of the given option.
 
@@ -145,7 +145,7 @@ class OptionSet:
         return FulfilledOptions(self._iter_fulfill(kvs))
 
 
-class _OptionsArgs(dagon.tool.args.ParsedArgs):
+class _OptionsArgs(dagon.tool.args.ParsedArgs, Protocol):
     opts: Sequence[str] | None
     list_options: bool
 

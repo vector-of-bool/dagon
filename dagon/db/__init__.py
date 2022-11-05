@@ -358,7 +358,9 @@ class Database:
         """
         c = self._db.cursor()
         _exec_kw(c, 'INSERT INTO dagon_runs (time) VALUES (:time)', time=datetime.datetime.now().timestamp())
-        cur = RunID(c.lastrowid)
+        rowid = c.lastrowid
+        assert rowid is not None
+        cur = RunID(rowid)
         return cur
 
     def __call__(self, q: str, **kwargs: QueryParameter) -> sqlite3.Cursor:
@@ -382,7 +384,9 @@ class Database:
             return TaskRowID(tid)
         c = self._db.cursor()
         _exec_kw(c, 'INSERT INTO dagon_tasks (name) VALUES (:name)', name=task)
-        return TaskRowID(c.lastrowid)
+        rowid = c.lastrowid
+        assert rowid is not None
+        return TaskRowID(rowid)
 
     def add_task_run(self,
                      *,
@@ -411,6 +415,7 @@ class Database:
             state=state.value,
         )
         trun_id = c.lastrowid
+        assert trun_id is not None
         return TaskRunID(trun_id)
 
     def new_interval(self, trun_id: TaskRunID, label: str, time: Optional[datetime.datetime] = None) -> IntervalID:
@@ -439,7 +444,9 @@ class Database:
             label=label,
             meta='{}',
         )
-        return IntervalID(c.lastrowid)
+        rowid = c.lastrowid
+        assert rowid is not None
+        return IntervalID(rowid)
 
     def set_interval_meta(self, interval: IntervalID, meta: Any) -> None:
         """
@@ -559,6 +566,7 @@ class Database:
                      retc=retc,
                      start_time=start_time.timestamp(),
                      duration=duration).lastrowid
+        assert rowid is not None
         return ProcExecID(rowid)
 
     def iter_files(self, *, run_id: Optional[RunID] = None) -> Iterable[FileInfo]:
