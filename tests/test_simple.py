@@ -5,7 +5,7 @@ import enum
 import pytest
 
 from dagon import option, task
-from dagon.option.ext import NoOptionValueError
+from dagon.option import NoOptionValueError
 from dagon.util import unused
 
 from tests.test_util import dag_test

@@ -12,6 +12,7 @@ import enum
 import hashlib
 import json
 import os
+import random
 import sqlite3
 from contextlib import ExitStack, asynccontextmanager, nullcontext
 from pathlib import Path, PurePath, PurePosixPath
@@ -28,7 +29,7 @@ from ..ext.iface import OpaqueTaskGraphView
 from ..fs import Pathish
 from ..proc import CompletedProcess
 from ..task.dag import OpaqueTask
-from ..util import Undefined, fixup_dataclass_docs
+from ..util import fixup_dataclass_docs
 
 QueryParameter = Union[int, str, bytes, float, None]
 """Any type that is known-safe to use as a database query parameter"""
@@ -72,17 +73,6 @@ class InvalidDatabase(DatabaseError):
         self.path = path
 
 
-class IncorrectDatabaseVersion(DatabaseError):
-    """
-    Exception thrown if the database version mismatches what Dagon expects
-    """
-    def __init__(self, path: Path, version: str, expected_version: str) -> None:
-        super().__init__(f'Database version is unsupported (Expected r{expected_version}, got r{version})')
-        self.path = path
-        self.version = version
-        self.expected_version = expected_version
-
-
 class _ProcOutputItem(Protocol):
     out: bytes
     kind: Literal['error', 'output']
@@ -103,6 +93,41 @@ def _db_connect(db_path: Pathish) -> sqlite3.Connection:
         PRAGMA synchronous = OFF;
     ''')
     return db
+
+
+def apply_migrations(db: sqlite3.Connection, meta_table: str, migrations: Sequence[str]) -> None:
+    meta_init = fr'''
+        CREATE TABLE IF NOT EXISTS {meta_table} (
+            version INTEGER NOT NULL
+        )
+    '''
+    db.execute(meta_init)
+    meta_rows = list(db.execute(f'SELECT version FROM {meta_table}'))
+    version: int
+    if not meta_rows:
+        version = 0
+    else:
+        version = util.cell(meta_rows)
+    n_migrations = len(migrations)
+    if version == n_migrations:
+        # All migrations are up-to-date
+        return
+    savepoint = random.randbytes(6).hex()
+    db.execute(f"savepoint '{savepoint}'")
+    try:
+        _apply_migrations(db, version, migrations)
+    except:
+        db.execute(f"rollback to '{savepoint}'")
+        db.execute(f"release savepoint '{savepoint}'")
+        raise
+    else:
+        db.execute(f'INSERT OR REPLACE INTO {meta_table} (rowid, version) VALUES (1, ?)', [n_migrations])
+        db.execute(f"release savepoint '{savepoint}'")
+
+
+def _apply_migrations(db: sqlite3.Connection, cur_version: int, migrations: Sequence[str]) -> None:
+    for m in migrations[cur_version:]:
+        db.execute(m)
 
 
 _DB_SCHEMA = r'''
@@ -160,11 +185,6 @@ CREATE TABLE dagon_task_deps_rel (
     depends_on TEXT,
     UNIQUE(run_id, dependent, depends_on) ON CONFLICT REPLACE
 );
-CREATE TABLE dagon_persists (
-    task_id REFERENCES dagon_tasks DEFAULT NULL,
-    key TEXT NOT NULL,
-    data TEXT NOT NULL
-);
 CREATE TABLE dagon_intervals (
     interval_id INTEGER PRIMARY KEY,
     task_run_id REFERENCES dagon_task_runs ON DELETE CASCADE,
@@ -204,8 +224,59 @@ def schema_hash() -> str:
 
 def _create_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
     db = _db_connect(db_path)
-    db.executescript(_DB_SCHEMA)
-    _exec_kw(db, 'INSERT INTO dagon_meta VALUES (:hash)', hash=schema_hash())
+    apply_migrations(db, 'dagon_db_meta', [
+        r'CREATE TABLE dagon_runs (run_id INTEGER PRIMARY KEY, time REAL NOT NULL)',
+        r'CREATE TABLE dagon_tasks (task_id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)',
+        r'''
+        CREATE TABLE dagon_task_runs (
+            task_run_id INTEGER PRIMARY KEY,
+            task_id INTEGER NOT NULL
+                    REFERENCES dagon_tasks ON DELETE CASCADE,
+            run_id INTEGER NOT NULL
+                   REFERENCES dagon_runs ON DELETE CASCADE,
+            end_state TEXT DEFAULT 'pending',
+            start_time REAL NOT NULL,
+            duration REAL,
+            UNIQUE (task_id, run_id) ON CONFLICT ABORT
+        )
+        ''',
+        r'''
+        CREATE TABLE dagon_task_deps_rel (
+            tree_id INTEGER PRIMARY KEY,
+            run_id INTEGER NOT NULL
+                   REFERENCES dagon_runs ON DELETE CASCADE,
+            dependent TEXT NOT NULL,
+            depends_on TEXT,
+            UNIQUE(run_id, dependent, depends_on) ON CONFLICT REPLACE
+        )
+        ''',
+        r'''
+        CREATE TABLE dagon_intervals (
+            interval_id INTEGER PRIMARY KEY,
+            task_run_id REFERENCES dagon_task_runs ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            meta,
+            start_time REAL NOT NULL,
+            end_time REAL
+        )
+        ''',
+        r'''
+        CREATE TABLE dagon_proc_execs (
+            proc_exec_id INTEGER PRIMARY KEY,
+            task_run_id
+                NOT NULL REFERENCES dagon_task_runs
+                ON DELETE CASCADE,
+            cmd NOT NULL,
+            start_cwd TEXT NOT NULL,
+            stdout BLOB,
+            stderr BLOB,
+            retc NOT NULL,
+            start_time REAL NOT NULL,
+            duration REAL NOT NULL
+        )''',
+    ])
+    # db.executescript(_DB_SCHEMA)
+    # _exec_kw(db, 'INSERT INTO dagon_meta VALUES (:hash)', hash=schema_hash())
     return db
 
 
@@ -222,15 +293,6 @@ def create_new_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
     return _create_sqlite_db(db_path)
 
 
-def _existing_db_schema_hash(db: sqlite3.Connection) -> str:
-    try:
-        for version, in _exec_kw(db, 'SELECT hash FROM dagon_meta'):
-            return cast(str, version)
-        return ''
-    except sqlite3.OperationalError:
-        return ''
-
-
 def get_ready_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
     """
     Get an sqlite3 connection object that is set up and ready to use to persist
@@ -240,57 +302,19 @@ def get_ready_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
     If the DB does not exist, or the DB has the wrong schema version, a new
     database is created at ``db_path``.
     """
-    db = _db_connect(db_path)
-    db.execute(r'''
-        CREATE TABLE IF NOT EXISTS dagon_meta (
-            version INTEGER NOT NULL
-        );
-    ''')
-    version = _existing_db_schema_hash(db)
-    if version != schema_hash():
-        db.close()
-        db = create_new_sqlite_db(db_path)
-
-    db.executescript(_DB_EXTRAS)
-    return db
-
-
-def get_existing_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
-    """
-    Obtain an existing sqlite3 database connection. Raises an exception if the
-    file does not exist or has the wrong schema version.
-    """
-    db_path = Path(db_path)
-    if not db_path.is_file():
-        raise MissingDatabase(db_path)
-    db = _db_connect(db_path)
-    items = list(
-        _exec_kw(
-            db,
-            '''
-            SELECT name FROM sqlite_master
-            WHERE type="table" AND name='dagon_meta' LIMIT 1
-            ''',
-        ))
-    if not items:
-        raise InvalidDatabase(db_path)
-
-    version, = util.first(_exec_kw(db, 'SELECT hash FROM dagon_meta'))
-    if version != schema_hash():
-        raise IncorrectDatabaseVersion(db_path, version, schema_hash())
-
+    db = _create_sqlite_db(db_path)
     db.executescript(_DB_EXTRAS)
     return db
 
 
 RunID = NewType('RunID', int)
-TaskRowID = NewType('TaskRowID', int)
+TaskID = NewType('TaskID', int)
 TaskRunID = NewType('TaskRunID', int)
 FileID = NewType('FileID', int)
 IntervalID = NewType('IntervalID', int)
 ProcExecID = NewType('ProcExecID', int)
 
-TaskRunRow: TypeAlias = 'tuple[TaskRunID, TaskRowID, RunID, int, str, float, Optional[float]]'
+TaskRunRow: TypeAlias = 'tuple[TaskRunID, TaskID, RunID, int, str, float, Optional[float]]'
 
 
 @dataclasses.dataclass(frozen=True)
@@ -340,14 +364,6 @@ class Database:
         db = get_ready_sqlite_db(db_path)
         return Database(db)
 
-    @staticmethod
-    def get_existing(db_path: Pathish) -> 'Database':
-        """
-        Get an existing database at the named path.
-        """
-        db = get_existing_sqlite_db(db_path)
-        return Database(db)
-
     @property
     def sqlite3_db(self) -> sqlite3.Connection:
         return self._db
@@ -375,23 +391,23 @@ class Database:
             with util.recursive_transaction(self.sqlite3_db):
                 yield
 
-    def get_task_rowid(self, task: str) -> TaskRowID:
+    def get_task_rowid(self, task: str) -> TaskID:
         """
         Get the ID of the named task (inserting a new row if it does not
         already exist).
         """
         for tid, in self('SELECT task_id FROM dagon_tasks WHERE name = :name', name=task):
-            return TaskRowID(tid)
+            return TaskID(tid)
         c = self._db.cursor()
         _exec_kw(c, 'INSERT INTO dagon_tasks (name) VALUES (:name)', name=task)
         rowid = c.lastrowid
         assert rowid is not None
-        return TaskRowID(rowid)
+        return TaskID(rowid)
 
     def add_task_run(self,
                      *,
                      run: RunID,
-                     task: TaskRowID,
+                     task: TaskID,
                      state: TaskState = TaskState.Pending,
                      start_time: Optional[datetime.datetime] = None) -> TaskRunID:
         """
@@ -502,22 +518,6 @@ class Database:
                  id=trun_id,
                  dur=duration.total_seconds())
 
-    def store_task_event(self, trun_id: TaskRunID, event: str, time: Optional[datetime.datetime] = None) -> None:
-        """
-        Store an arbitrary event associated with a task.
-
-        :param trun_id: The task run ID, obtained from :func:`add_task_run`
-        :param event: String representing the event.
-        :param time: The time of the event. If ``None``, uses the current time.
-        """
-        self(r'''
-            INSERT INTO dagon_task_events (task_run_id, event, time)
-            VALUES (:tid, :event, :time)
-            ''',
-             tid=trun_id,
-             event=event,
-             time=(time or datetime.datetime.now()).timestamp())
-
     def store_proc_execution(self, trun_id: TaskRunID, *, cmd: Sequence[str], cwd: PurePath,
                              output: Iterable[_ProcOutputItem] | None, retc: int, start_time: datetime.datetime,
                              duration: float) -> ProcExecID:
@@ -621,62 +621,6 @@ class Database:
         return cast(Iterable['tuple[str, str]'],
                     self('SELECT dependent, depends_on FROM dagon_task_deps_rel WHERE run_id=:r', r=run_id))
 
-    def load_persist(self, key: str, task_id: Optional[TaskRowID]) -> Any:
-        """
-        Load a persisted value from the database.
-
-        :param key: The key of the stored value.
-        :param task_id: The task that they value is attached to. If ``None``,
-            it is considered a "global" persisted value.
-
-        :return: The resulting value, or :data:`Undefined` if there is no value
-            stored in the database.
-        """
-        data = self(
-            r'''
-            SELECT data
-              FROM dagon_persists
-              WHERE key IS :key
-                    and task_id IS :task_id
-            ''',
-            key=key,
-            task_id=task_id,
-        )
-        for dat_str, in data:
-            return json.loads(dat_str)
-        return Undefined
-
-    def set_persist(self, key: str, task_id: Optional[TaskRowID], value: Any) -> None:
-        """
-        Store a persistent value in the database.
-
-        :param key: The key under which to store the value.
-        :param task_id: The task to attach the value to. If ``None``, the
-            value is "global" and not attached to a task.
-        :param value: The value to store. Must be JSON-serializable.
-        """
-        n_existing, = util.first(
-            self('SELECT count(*) FROM dagon_persists WHERE key IS :key AND task_id IS :tid', key=key, tid=task_id))
-        assert n_existing in (0, 1), n_existing
-        if n_existing:
-            self('''
-                 UPDATE dagon_persists
-                    SET data = :data
-                  WHERE key IS :key
-                        AND task_id IS :tid
-                 ''',
-                 data=json.dumps(value),
-                 key=key,
-                 tid=task_id)
-        else:
-            self('''
-                 INSERT INTO dagon_persists (key, task_id, data)
-                 VALUES (:key, :tid, :data)
-                 ''',
-                 key=key,
-                 tid=task_id,
-                 data=json.dumps(value))
-
 
 @fixup_dataclass_docs
 @dataclasses.dataclass()
@@ -690,7 +634,7 @@ class GlobalContext(NamedTuple):
 
 
 class TaskContext(NamedTuple):
-    task_id: TaskRowID
+    task_id: TaskID
     task_run_id: TaskRunID
     start_time: datetime.datetime
 

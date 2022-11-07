@@ -3,11 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from . import option as mod
+import dagon.option as mod
 
-
-def test_simple_option() -> None:
-    mod.Option('foo', type=int, parse=int)
+_OptionSet = mod._OptionSet  # pyright: ignore
+_Option = mod._Option  # pyright: ignore
 
 
 def test_bool() -> None:
@@ -40,3 +39,10 @@ def test_parse_option() -> None:
     assert mod.parse_value_str(int, '11') == 11
     with pytest.raises(ValueError):
         mod.parse_value_str(MyEnum, 'invalid')
+
+
+def test_option_set() -> None:
+    s = _OptionSet()
+    opt = _Option('key', type=int, parse=int)
+    s.add(opt)
+    assert s.get('key') is opt

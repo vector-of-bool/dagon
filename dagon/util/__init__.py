@@ -6,7 +6,6 @@ General utilities
 """
 from __future__ import annotations
 
-import enum
 import contextvars
 import difflib
 import sqlite3
@@ -25,21 +24,11 @@ U = TypeVar('U')
 "A second generic invariant type variable"
 
 
-class UndefinedType(enum.Enum):
-    """
-    The type of the generic :const:`Undefined` constant.
-    """
-    Undefined = 0
-
-    def __repr__(self) -> str:
-        return 'Undefined'
+class DefaultSentinelType():
+    pass
 
 
-Undefined = UndefinedType.Undefined
-"""
-An 'undefined' constant to be used to represent the absence of parameter/return
-values where `None` is within the domain of that parameter or return value.
-"""
+_DEFAULT_SENTINEL: Any = DefaultSentinelType()
 
 
 @overload
@@ -52,7 +41,7 @@ def first(items: Iterable[T], *, default: U) -> T | U:
     ...
 
 
-def first(items: Iterable[T], **kw: U) -> T | U:
+def first(items: Iterable[T], default: U = _DEFAULT_SENTINEL) -> T | U:
     """
     Obtain the first element of an iterable
 
@@ -64,9 +53,13 @@ def first(items: Iterable[T], **kw: U) -> T | U:
     """
     for n in items:
         return n
-    if 'default' not in kw:
-        raise ValueError(f'No first item in an empty iterable ({items!r})')
-    return kw['default']
+    if default is not _DEFAULT_SENTINEL:
+        return default
+    raise ValueError(f'No first item in an empty iterable ({items!r})')
+
+
+def cell(table: Iterable[Iterable[T]]) -> T:
+    return first(first(table))
 
 
 def unused(*args: Any) -> None:

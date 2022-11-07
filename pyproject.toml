@@ -22,7 +22,7 @@ dagon-inspect = "dagon.inspect.main:start"
 yapf = "^0.31.0"
 pyright = "^0.0.13"
 pylint = "^2.12.2"
-pytest = "^6.2.5"
+pytest = "^7.2.0"
 tox = "^3.24.4"
 Sphinx = "^4.3.1"
 sphinx-autodoc-typehints = "^1.12.0"
@@ -30,15 +30,17 @@ pytest-asyncio = "^0.16.0"
 pytest-xdist = "^2.5.0"
 litecli = "^1.6.0"
 graphviz = "^0.19.1"
+sphinx-autobuild = "^2021.3.14"
 
 [tool.pyright]
 include = ["dagon/"]
+exclude = ["dagon/inspect/graph.py"]
 strict = ["**"]
 typeshed-path = "typings"
 
 [tool.poetry.plugins."dagon.extensions"]
 "dagon.events" = "dagon.event:_EventsExt"
-"dagon.options" = "dagon.option.ext:_OptionsExt"
+"dagon.options" = "dagon.option:_OptionsExt"
 "dagon.pools" = "dagon.pool:_PoolsExt"
 "dagon.db" = "dagon.db:_DatabaseExt"
 "dagon.persist" = "dagon.persist:_PersistExt"
@@ -50,7 +52,7 @@ typeshed-path = "typings"
 
 [tool.pytest.ini_options]
 filterwarnings = [
-    "error"
+    # "error"
 ]
 
 [build-system]
