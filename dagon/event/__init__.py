@@ -36,7 +36,7 @@ from ..ext.iface import OpaqueTaskGraphView
 from ..task.dag import OpaqueTask
 from ..util import T, scope_set_contextvar, unused
 from .cancel import CancellationToken, CancelLevel, raise_if_cancelled
-from .event import ConnectionToken, Event, EventMap
+from .event import ConnectionToken, Event, EventMap, Handler
 
 __all__ = [
     'events',
@@ -46,6 +46,7 @@ __all__ = [
     'ConnectionToken',
     'CancelLevel',
     'EventMap',
+    'Handler',
     'interval_context',
     'interval_end',
     'interval_start',
