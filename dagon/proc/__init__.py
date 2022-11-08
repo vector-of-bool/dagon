@@ -15,17 +15,17 @@ import signal
 import subprocess
 import warnings
 from pathlib import Path, PurePath
-from typing import (Any, Callable, Iterable, Mapping, NamedTuple, Sequence, Union, cast)
+from typing import (Callable, Iterable, Mapping, NamedTuple, Sequence, Union, cast)
 
 from typing_extensions import Literal, Protocol
 
-from ..event import Event, events
-
 from .. import ui
+from ..event import Event, events
 from ..event.cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from ..fs import Pathish
-from ..task import (DependsArg, Task, TaskDAG, current_dag, iter_deps)
+from ..task import DependsArg, Task, TaskDAG, current_dag, iter_deps
 from ..ui import MessageType
+from ..util import JSONValue
 
 _AioProcess = asyncio.subprocess.Process
 
@@ -70,7 +70,7 @@ class ProcessResult(Protocol):
         "The output records of the subprocess"
         ...
 
-    def stdout_json(self) -> Any:
+    def stdout_json(self) -> JSONValue:
         "Interpret the output as JSON data."
         ...
 
@@ -79,7 +79,7 @@ class _ProcessResultTup(NamedTuple):
     retcode: int
     output: Sequence[ProcessOutputItem]
 
-    def stdout_json(self) -> Any:
+    def stdout_json(self) -> JSONValue:
         dat = b''.join(i.out for i in self.output if i.kind == 'output')
         return json.loads(dat)
 

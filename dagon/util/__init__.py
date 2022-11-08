@@ -12,7 +12,8 @@ import sqlite3
 import types
 from contextlib import ExitStack, contextmanager
 from typing import (TYPE_CHECKING, Any, AsyncContextManager, Awaitable, Callable, ContextManager, Generator, Generic,
-                    Iterable, Iterator, Type, TypeVar, cast, overload)
+                    Iterable, Iterator, Mapping, MutableMapping, MutableSequence, Sequence, Type, TypeVar, Union, cast,
+                    overload)
 
 from typing_extensions import Protocol
 
@@ -259,3 +260,13 @@ def recursive_transaction(db: sqlite3.Connection) -> Iterator[None]:
     else:
         assert db.in_transaction, 'transaction was ended prematurely'
         db.execute('COMMIT')
+
+
+JSONScalar = Union[int, float, bool, None, str]
+JSONArray = Sequence['JSONValue']
+JSONObject = Mapping[str, 'JSONValue']
+JSONValue = Union[JSONScalar, JSONArray, JSONObject]
+
+MutableJSONArray = MutableSequence['MutableJSONValue']
+MutableJSONObject = MutableMapping[str, 'MutableJSONValue']
+MutableJSONValue = Union[JSONScalar, JSONArray, JSONObject]
