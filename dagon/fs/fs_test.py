@@ -38,6 +38,66 @@ async def test_copy_to_noexist_dir(tmp_path: Path) -> None:
 
 
 @async_test
+async def test_remove_file(tmp_path: Path) -> None:
+    foo_txt = tmp_path / 'foo.txt'
+
+    with pytest.raises(FileNotFoundError):
+        await fs.remove(foo_txt)
+    await fs.remove(foo_txt, absent_ok=True)
+
+    foo_txt.write_text('hello')
+    assert foo_txt.is_file()
+
+    await fs.remove(foo_txt)
+    assert not foo_txt.is_file()
+
+    with pytest.raises(FileNotFoundError):
+        await fs.remove(foo_txt)
+    await fs.remove(foo_txt, absent_ok=True)
+
+    foo_txt.write_text('hello')
+    assert foo_txt.is_file()
+    await fs.remove(foo_txt, absent_ok=True)
+    assert not foo_txt.is_file()
+
+    foo_txt.write_text('hello')
+    await fs.remove(foo_txt, absent_ok=True, recurse=True)
+    assert not foo_txt.is_file()
+
+
+@async_test
+async def test_remove_file_fast(tmp_path: Path) -> None:
+    foo_txt = tmp_path / 'foo.txt'
+    foo_txt.write_text('hello')
+    assert foo_txt.exists()
+    # File is already deleted, even if we don't await it yet:
+    f = fs.remove(foo_txt)
+    assert not foo_txt.exists()
+    await f
+
+
+@async_test
+async def test_remove_tree(tmp_path: Path) -> None:
+    subdir = tmp_path / 'foo'
+    with pytest.raises(FileNotFoundError):
+        await fs.remove(subdir)
+    await fs.remove(subdir, recurse=True, absent_ok=True)
+    await fs.create_tree(
+        tmp_path,
+        {'foo': {
+            'bar.bin': b'hello',
+            'baz.bin': b'hola',
+            'quux': {
+                'info.txt': b'I am a file in a subdirectory'
+            }
+        }})
+    assert subdir.is_dir()
+    f = fs.remove(subdir, recurse=True)
+    assert not subdir.is_dir()
+    await f
+
+
+@async_test
 async def test_copy_file_is_dir(tmp_path: Path) -> None:
     tmp_path.joinpath('foo.dir').mkdir()
     with pytest.raises(IsADirectoryError):
