@@ -350,8 +350,10 @@ def remove(files: NPaths,
         deleted in the background). Await the result of :func:`remove` to block
         until the deletion operations are actually completed.
     """
-    multi_files = iter_pathish(files)
     cancel = cancel or CancellationToken.get_context_local()
+    if isinstance(files, (str, PurePath)):
+        return _remove1(Path(files), recurse, absent_ok, cancel)
+    multi_files = iter_pathish(files)
     multi_rm = map(lambda f: _remove1(f, recurse, absent_ok, cancel), multi_files)
     futs = set(map(asyncio.ensure_future, multi_rm))
     return _remove_gather(futs)
