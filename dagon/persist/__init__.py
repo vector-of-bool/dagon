@@ -16,12 +16,7 @@ from typing_extensions import Protocol
 
 from .. import db
 from ..ext.base import BaseExtension
-
-
-class Key(Generic[T]):
-    def __init__(self, key: str) -> None:
-        self.key = key
-
+from ..cache import Key
 
 _DEFAULT_SENTINEL: Any = object()
 

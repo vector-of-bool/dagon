@@ -9,7 +9,7 @@ from ..task.task_test import run_test_on_fun
 
 @pytest.fixture
 def db() -> db_mod.Database:
-    return db_mod.Database.get_or_create(':memory:')
+    return db_mod.Database.open(':memory:')
 
 
 EGGS = mod.Key[int]('eggs')
