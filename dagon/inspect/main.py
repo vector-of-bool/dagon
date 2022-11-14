@@ -306,7 +306,7 @@ def main(argv: Sequence[str]) -> int:
     args = parser.parse_args(argv)
 
     db_path = Path(args.database or '.dagon.db').absolute()
-    db = Database.get_existing(db_path)
+    db = Database.open(db_path, mode='open-existing')
 
     ansi.ensure_ansi_term()
     if not hasattr(args, 'choice'):

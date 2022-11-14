@@ -59,8 +59,21 @@ def first(items: Iterable[T], default: U = _DEFAULT_SENTINEL) -> T | U:
     raise ValueError(f'No first item in an empty iterable ({items!r})')
 
 
+@overload
 def cell(table: Iterable[Iterable[T]]) -> T:
-    return first(first(table))
+    ...
+
+
+@overload
+def cell(table: Iterable[Iterable[T]], *, default: U) -> T | U:
+    ...
+
+
+def cell(table: Iterable[Iterable[T]], *, default: U = _DEFAULT_SENTINEL) -> T | U:
+    v = first(first(table, default=(default, )), default=default)
+    if v is _DEFAULT_SENTINEL:
+        raise ValueError(f'No first item in an empty iterable ({table!r})')
+    return v
 
 
 def unused(*args: Any) -> None:
@@ -270,3 +283,17 @@ JSONValue = Union[JSONScalar, JSONArray, JSONObject]
 MutableJSONArray = MutableSequence['MutableJSONValue']
 MutableJSONObject = MutableMapping[str, 'MutableJSONValue']
 MutableJSONValue = Union[JSONScalar, JSONArray, JSONObject]
+
+
+class _LazyAttrLookup(Generic[T]):
+    def __init__(self, callback: Callable[[], T]) -> None:
+        self.__callback__ = callback
+
+    def __getattribute__(self, __name: str) -> Any:
+        cb = object.__getattribute__(self, '__callback__')
+        this = cb()
+        return getattr(this, __name)
+
+
+def create_lazy_lookup(cb: Callable[[], T]) -> T:
+    return cast(T, _LazyAttrLookup(cb))

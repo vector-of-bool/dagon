@@ -8,10 +8,12 @@ import asyncio
 import sqlite3
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path, PosixPath, PurePosixPath
-from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Iterable, Optional)
+from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Iterable, Optional,
+                    overload)
 
-from typing_extensions import Protocol
+from typing_extensions import Literal, Protocol
 
+from ..ext.base import BaseExtension
 from .. import fs, util
 from .. import db as db_mod
 from ..fs import IfExists, NPaths, Pathish, iter_pathish
@@ -32,6 +34,20 @@ class IFileStorage(Protocol):
     """
     Access to filesystem-like storage.
     """
+    @overload
+    def open_file_writer(self, fpath: Pathish) -> AsyncContextManager[IFileWriter]:
+        ...
+
+    @overload
+    def open_file_writer(self, fpath: Pathish, *, if_exists: Literal['fail',
+                                                                     'replace']) -> AsyncContextManager[IFileWriter]:
+        ...
+
+    @overload
+    def open_file_writer(self, fpath: Pathish, *,
+                         if_exists: Literal['keep']) -> AsyncContextManager[None | IFileWriter]:
+        ...
+
     def open_file_writer(self,
                          fpath: Pathish,
                          *,
@@ -84,20 +100,13 @@ class _DatabaseFileWriter:
         self._counter += 1
 
 
-_META_VERSION = 1
+class _Ext(BaseExtension[None, None, None]):
+    dagon_ext_name: str = 'dagon.storage'
 
-
-class _DatabaseFileStorage:
-    def __init__(self, db: db_mod.Database, subkey: int) -> None:
-        self._db = db
-        self._subkey = subkey
-        self._migrate_dbstore(db)
-
-    @staticmethod
-    def _do_migrate_dbstore(db: db_mod.Database) -> None:
-        for s in [
-                'DROP TABLE IF EXISTS dagon_storage_files',
-                'DROP TABLE IF EXISTS dagon_storage_file_data',
+    def global_context(self, graph: 'OpaqueTaskGraphView') -> AsyncContextManager[None]:
+        db = db_mod.global_context_data()
+        if db:
+            db_mod.apply_migrations(db.database.sqlite3_db, 'dagon_storage_meta', [
                 r'''
                 CREATE TABLE dagon_storage_files (
                     file_id INTEGER PRIMARY KEY,
@@ -113,24 +122,36 @@ class _DatabaseFileStorage:
                     data BLOB NOT NULL,
                     UNIQUE(file_id, nth)
                 )''',
-        ]:
-            db(s)
+                r'''
+                CREATE VIEW dagon_file_data_sizes AS
+                    SELECT file_id,
+                           nth,
+                           length(data) AS size
+                      FROM dagon_storage_file_data
+                ''',
+                r'''
+                CREATE VIEW dagon_file_sizes AS
+                    SELECT file_id,
+                           sum(size) AS size
+                      FROM dagon_file_data_sizes
+                  GROUP BY file_id
+                ''',
+                r'''
+                CREATE VIEW dagon_sized_files AS
+                    SELECT * FROM dagon_storage_files
+                             NATURAL JOIN dagon_file_sizes
+                ''',
+            ])
+        return util.AsyncNullContext(None)
 
-    @staticmethod
-    def _migrate_dbstore(db: db_mod.Database) -> None:
-        db.sqlite3_db.execute(r'''
-            CREATE TABLE IF NOT EXISTS dagon_storage_meta (
-                meta INTEGER NOT NULL
-            )
-        ''')
-        meta = list(db('SELECT meta FROM dagon_storage_meta'))
-        if meta and meta[0][0] == _META_VERSION:
-            # Database schema is up-to-date
-            return
 
-        with util.recursive_transaction(db.sqlite3_db):
-            _DatabaseFileStorage._do_migrate_dbstore(db)
-            db('INSERT INTO dagon_storage_meta(meta) VALUES (:ver)', ver=_META_VERSION)
+util.unused(_Ext)
+
+
+class _DatabaseFileStorage(IFileStorage):
+    def __init__(self, db: db_mod.Database, subkey: int) -> None:
+        self._db = db
+        self._subkey = subkey
 
     @asynccontextmanager
     async def read_file(self, fpath: Pathish) -> AsyncIterator[AsyncIterable[bytes]]:
@@ -222,7 +243,7 @@ class _NativeFileWriter:
             remain -= self._fd.write(dat)
 
 
-class NativeFileStorage:
+class NativeFileStorage(IFileStorage):
     def __init__(self, directory: Pathish):
         self._path = Path(directory).resolve()
 
