@@ -1,20 +1,18 @@
 from __future__ import annotations
+
 from datetime import datetime
 from io import BufferedReader
-
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncGenerator, AsyncIterable, AsyncIterator, BinaryIO,
-                    Mapping, NamedTuple, Sequence, Union)
-from typing_extensions import Literal
+from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, AsyncIterator, BinaryIO, Mapping, NamedTuple,
+                    Sequence, Union)
 
 import pkg_resources
 from dagon import util
 
-from dagon.util import AsyncNullContext
-
+from ..util import AsyncNullContext
 from .. import fs
 from ..event import Handler
 from ..event.cancel import CancellationToken, raise_if_cancelled
@@ -100,7 +98,6 @@ async def _init_request(
 ) -> AsyncIterator[aiohttp.ClientResponse]:
     check_supported()
     headers = headers or {}
-    # pyright: reportUnnecessaryIsInstance=false
     async with _get_context() as glb:
         async with glb.session.request(method, url, data=data, headers=headers) as res:
             res.raise_for_status()
