@@ -5,7 +5,7 @@ import re
 from tests.test_util import dag_test
 
 
-@dag_test(['meow'])
+@dag_test()
 def test_pool():
     pool.add('one', 1)
 
@@ -32,3 +32,5 @@ def test_pool():
 
     with pytest.raises(NameError, match=re.escape('No pool "wegasdf" is defined. (Did you mean "one"?)')):
         pool.assign(another, 'wegasdf')
+
+    return [meow]

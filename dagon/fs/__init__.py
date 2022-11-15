@@ -12,16 +12,19 @@ import errno
 import itertools
 import os
 import shutil
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from io import BufferedIOBase
 from pathlib import Path, PurePath
-from typing import (AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Mapping, TypeVar,
-                    Union, overload)
+from types import TracebackType
+from typing import (AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Mapping, Type,
+                    TypeVar, Union, overload)
 
 from typing_extensions import Literal
 
 from .. import util
 from ..event import CancellationToken, raise_if_cancelled
+from ..util import T
 
 Pathish = Union['os.PathLike[str]', str]
 'A path-able argument. A string, subclass of `~pathlib.PurePath`, or anything with an ``__fspath__`` member'
@@ -70,7 +73,7 @@ def fs_thread_pool() -> ThreadPoolExecutor:
     return _FS_OPS_POOL
 
 
-def _run_fs_op(fn: Callable[[], None]) -> 'asyncio.Future[None]':
+def _run_fs_op(fn: Callable[[], T]) -> asyncio.Future[T]:
     loop = asyncio.get_event_loop()
     return loop.run_in_executor(fs_thread_pool(), fn)  # type: ignore
 
@@ -270,6 +273,7 @@ TreeItem = Union[bytes, Mapping[str, 'TreeItem']]
 
 
 async def create_tree(root: Pathish, items: Mapping[str, TreeItem], *, cancel: CancellationToken | None = None) -> None:
+    cancel = cancel or CancellationToken.get_context_local()
     raise_if_cancelled(cancel)
     return await _run_fs_op(lambda: _create_fs_tree(root, items, cancel))
 
@@ -316,7 +320,21 @@ def _remove1(f: Path, recurse: bool, absent_ok: bool, cancel: CancellationToken 
 
 def _remove_dir(dirpath: Path, cancel: CancellationToken | None) -> None:
     raise_if_cancelled(cancel)
-    shutil.rmtree(dirpath)
+    shutil.rmtree(dirpath, onerror=_rmtree_on_error)
+
+
+def _rmtree_on_error(
+    fn: Callable[[str], None],
+    path: str,
+    _exc: tuple[Type[BaseException], BaseException, TracebackType],
+) -> None:
+    try:
+        raise
+    except PermissionError as e:
+        if e.errno != 5:
+            raise
+        os.chmod(path, stat.S_IWRITE)
+        fn(path)
 
 
 def remove(files: NPaths,
@@ -350,8 +368,10 @@ def remove(files: NPaths,
         deleted in the background). Await the result of :func:`remove` to block
         until the deletion operations are actually completed.
     """
-    multi_files = iter_pathish(files)
     cancel = cancel or CancellationToken.get_context_local()
+    if isinstance(files, (str, PurePath)):
+        return _remove1(Path(files), recurse, absent_ok, cancel)
+    multi_files = iter_pathish(files)
     multi_rm = map(lambda f: _remove1(f, recurse, absent_ok, cancel), multi_files)
     futs = set(map(asyncio.ensure_future, multi_rm))
     return _remove_gather(futs)
@@ -390,10 +410,10 @@ async def read_blocks_from(io: BufferedIOBase,
                            block_size: int = 1024 * 10,
                            cancel: CancellationToken | None = None) -> AsyncIterator[memoryview]:
     buf = bytearray(block_size)
-    loop = asyncio.get_event_loop()
+    cancel = CancellationToken.get_context_local()
     while True:
         raise_if_cancelled(cancel)
-        nread = await loop.run_in_executor(_FS_OPS_POOL, lambda: _read_some(io, buf))
+        nread = await _run_fs_op(lambda: _read_some(io, buf))
         if nread == 0:
             break
         yield memoryview(buf)[:nread]
@@ -431,6 +451,7 @@ def safe_move_file(source: Pathish,
     """
     source = Path(source)
     dest = Path(dest)
+    cancel = cancel or CancellationToken.get_context_local()
     raise_if_cancelled(cancel)
     if mkdirs:
         dest.parent.mkdir(parents=True, exist_ok=True)

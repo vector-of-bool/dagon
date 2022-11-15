@@ -11,12 +11,16 @@ repository = "https://github.com/vector-of-bool/dagon"
 
 [tool.poetry.dependencies]
 python = "^3.7"
-typing-extensions = "^4.0.1"
+typing-extensions = "^4.4.0"
 importlib-metadata = { "version" = "*", python = "<3.10" }
+aiohttp = { "version" = "^3.8.3", optional = true }
 
 [tool.poetry.scripts]
 dagon = "dagon.tool.main:start"
 dagon-inspect = "dagon.inspect.main:start"
+
+[tool.poetry.extras]
+http = ["aiohttp"]
 
 [tool.poetry.dev-dependencies]
 yapf = "^0.31.0"
@@ -37,6 +41,7 @@ include = ["dagon/"]
 exclude = ["dagon/inspect/graph.py"]
 strict = ["**"]
 typeshed-path = "typings"
+pythonversion = "3.7"
 
 [tool.poetry.plugins."dagon.extensions"]
 "dagon.events" = "dagon.event:_EventsExt"
@@ -45,6 +50,9 @@ typeshed-path = "typings"
 "dagon.db" = "dagon.db:_DatabaseExt"
 "dagon.persist" = "dagon.persist:_PersistExt"
 "dagon.ui" = "dagon.ui:_Ext"
+"dagon.http" = "dagon.http:_Ext"
+"dagon.cache" = "dagon.cache:_Ext"
+"dagon.storage" = "dagon.storage:_Ext"
 
 [tool.poetry.plugins."dagon.uis"]
 "dagon.ui.simple" = "dagon.ui.simple:SimpleUI"

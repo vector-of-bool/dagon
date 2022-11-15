@@ -29,7 +29,7 @@ from ..ext.iface import OpaqueTaskGraphView
 from ..fs import Pathish
 from ..proc import CompletedProcess
 from ..task.dag import OpaqueTask
-from ..util import fixup_dataclass_docs
+from ..util import Opaque, fixup_dataclass_docs
 
 QueryParameter = Union[int, str, bytes, float, None]
 """Any type that is known-safe to use as a database query parameter"""
@@ -195,24 +195,6 @@ CREATE TABLE dagon_intervals (
 );
 '''
 
-_DB_EXTRAS = r'''
-CREATE TEMP VIEW dagon_file_data_sizes AS
-    SELECT file_id,
-           n,
-           length(data) AS size
-      FROM file_data;
-
-CREATE TEMP VIEW dagon_file_sizes AS
-    SELECT file_id,
-           sum(size) AS size
-      FROM dagon_file_data_sizes
-  GROUP BY file_id;
-
-CREATE TEMP VIEW dagon_sized_files AS
-    SELECT * FROM files
-             NATURAL JOIN dagon_file_sizes;
-'''
-
 
 def schema_hash() -> str:
     """
@@ -280,20 +262,10 @@ def _create_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
     return db
 
 
-def create_new_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
-    """
-    Create a new sqlite3 database at ``db_path``. Will remove an existing file
-    if necessary.
-    """
-    if db_path == ':memory:':
-        return _create_sqlite_db(db_path)
-    db_path = Path(db_path)
-    if db_path.exists():
-        db_path.unlink()
-    return _create_sqlite_db(db_path)
-
-
-def get_ready_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
+def open_sqlite_db(db_path: Pathish,
+                   *,
+                   mode: Literal['create-if-missing', 'force-create-new',
+                                 'open-existing'] = 'create-if-missing') -> sqlite3.Connection:
     """
     Get an sqlite3 connection object that is set up and ready to use to persist
     information.
@@ -302,8 +274,20 @@ def get_ready_sqlite_db(db_path: Pathish) -> sqlite3.Connection:
     If the DB does not exist, or the DB has the wrong schema version, a new
     database is created at ``db_path``.
     """
-    db = _create_sqlite_db(db_path)
-    db.executescript(_DB_EXTRAS)
+    if db_path in ('', ':memory:'):
+        db = _create_sqlite_db(db_path)
+    elif mode == 'create-if-missing':
+        db = _create_sqlite_db(db_path)
+    elif mode == 'force-create-new':
+        Path(db_path).unlink(missing_ok=True)
+        db = _create_sqlite_db(db_path)
+    elif mode == 'open-existing':
+        if not Path(db_path).is_file():
+            raise FileNotFoundError(db_path)
+        db = _create_sqlite_db(db_path)
+    else:
+        _: Opaque = mode
+        assert False
     return db
 
 
@@ -356,12 +340,15 @@ class Database:
         self._transaction_lock = asyncio.Lock()
 
     @staticmethod
-    def get_or_create(db_path: Pathish) -> 'Database':
+    def open(
+            db_path: Pathish,
+            *,
+            mode: Literal['create-if-missing', 'force-create-new',
+                          'open-existing'] = 'create-if-missing') -> 'Database':
         """
         Get or create a new database object at the given path (or ``:memory:``)
         """
-        # db = create_new_sqlite_db(db_path)
-        db = get_ready_sqlite_db(db_path)
+        db = open_sqlite_db(db_path, mode=mode)
         return Database(db)
 
     @property
@@ -593,7 +580,7 @@ class Database:
         """
         if isinstance(file, FileInfo):
             file = file.file_id
-        for dat, in self('SELECT data FROM file_data WHERE file_id=:fid ORDER BY n', fid=file):
+        for dat, in self('SELECT data FROM dagon_storage_file_data WHERE file_id=:fid ORDER BY nth', fid=file):
             yield dat
 
     def add_task_dep(self, *, run_id: RunID, dependent: str, depends_on: Optional[str]) -> None:
@@ -664,7 +651,7 @@ class _DatabaseExt(BaseExtension[_AppContext, GlobalContext, _TaskContextPriv]):
 
     @asynccontextmanager
     async def global_context(self, graph: OpaqueTaskGraphView) -> AsyncIterator[GlobalContext]:
-        db = Database.get_or_create(self.app_data().db_path or '.dagon.db')
+        db = Database.open(self.app_data().db_path or '.dagon.db')
         rid = db.new_run_id()
         # Yield now to let the graph run
         yield GlobalContext(db, rid)

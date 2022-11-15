@@ -7,13 +7,13 @@ from .. import db as mod
 
 
 def get_mem_db() -> mod.Database:
-    return mod.Database.get_or_create(':memory:')
+    return mod.Database.open(':memory:')
 
 
 # Mark tests as asyncio to ensure there is a thread loop for the database
 @pytest.mark.asyncio
 def test_create() -> None:
-    mod.get_ready_sqlite_db(':memory:')
+    mod.open_sqlite_db(':memory:')
 
 
 @pytest.mark.asyncio

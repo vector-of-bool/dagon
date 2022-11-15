@@ -427,7 +427,7 @@ async def spawn(cmd: CommandLine,
     # Call _proc_done when the process completes
     on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, print_output_on_finish, p1, p0, prev_on_done)
 
-    on_line = as_line_handler(on_output)
+    on_line = _as_line_handler(on_output)
 
     # Spawn that subprocess!
     proc = await asyncio.create_subprocess_exec(
@@ -465,8 +465,10 @@ class _UpdateStatus:
 class _LogLine:
     def __call__(self, line: ProcessOutputItem) -> None:
         data = line.out
-        if data.endswith(OS_PREFERRED_NEWLINE):
-            data = data[:-len(OS_PREFERRED_NEWLINE)]
+        if data.endswith(b'\r\n'):
+            data = data[:-2]
+        elif data.endswith(b'\n'):
+            data = data[:-1]
         ui.print(data.decode(errors='?'), type=MessageType.Error if line.kind == 'error' else MessageType.Print)
 
 
@@ -576,7 +578,7 @@ def cmd_task(name: str,
     return t
 
 
-def as_line_handler(l: LineHandler | OutputMode | None) -> LineHandler | None:
+def _as_line_handler(l: LineHandler | OutputMode | None) -> LineHandler | None:
     if l is None:
         return None
     if callable(l):
