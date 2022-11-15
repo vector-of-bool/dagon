@@ -13,9 +13,10 @@ from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, Async
 
 from typing_extensions import Literal, Protocol
 
-from ..ext.base import BaseExtension
-from .. import fs, util
 from .. import db as db_mod
+from .. import fs, util
+from ..ext.base import BaseExtension
+from ..ext.iface import OpaqueTaskGraphView
 from ..fs import IfExists, NPaths, Pathish, iter_pathish
 
 
@@ -100,48 +101,52 @@ class _DatabaseFileWriter:
         self._counter += 1
 
 
+def _migrate_db(db: db_mod.Database) -> None:
+    db_mod.apply_migrations(db.sqlite3_db, 'dagon_storage_meta', [
+        r'''
+        CREATE TABLE dagon_storage_files (
+            file_id INTEGER PRIMARY KEY,
+            run_id NOT NULL REFERENCES dagon_runs ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            UNIQUE(run_id, path)
+        )''',
+        r'''
+        CREATE TABLE dagon_storage_file_data (
+            data_id INTEGER PRIMARY KEY,
+            file_id NOT NULL REFERENCES dagon_storage_files ON DELETE CASCADE,
+            nth INTEGER NOT NULL,
+            data BLOB NOT NULL,
+            UNIQUE(file_id, nth)
+        )''',
+        r'''
+        CREATE VIEW dagon_file_data_sizes AS
+            SELECT file_id,
+                    nth,
+                    length(data) AS size
+                FROM dagon_storage_file_data
+        ''',
+        r'''
+        CREATE VIEW dagon_file_sizes AS
+            SELECT file_id,
+                    sum(size) AS size
+                FROM dagon_file_data_sizes
+            GROUP BY file_id
+        ''',
+        r'''
+        CREATE VIEW dagon_sized_files AS
+            SELECT * FROM dagon_storage_files
+                        NATURAL JOIN dagon_file_sizes
+        ''',
+    ])
+
+
 class _Ext(BaseExtension[None, None, None]):
     dagon_ext_name: str = 'dagon.storage'
 
     def global_context(self, graph: 'OpaqueTaskGraphView') -> AsyncContextManager[None]:
         db = db_mod.global_context_data()
         if db:
-            db_mod.apply_migrations(db.database.sqlite3_db, 'dagon_storage_meta', [
-                r'''
-                CREATE TABLE dagon_storage_files (
-                    file_id INTEGER PRIMARY KEY,
-                    run_id NOT NULL REFERENCES dagon_runs ON DELETE CASCADE,
-                    path TEXT NOT NULL,
-                    UNIQUE(run_id, path)
-                )''',
-                r'''
-                CREATE TABLE dagon_storage_file_data (
-                    data_id INTEGER PRIMARY KEY,
-                    file_id NOT NULL REFERENCES dagon_storage_files ON DELETE CASCADE,
-                    nth INTEGER NOT NULL,
-                    data BLOB NOT NULL,
-                    UNIQUE(file_id, nth)
-                )''',
-                r'''
-                CREATE VIEW dagon_file_data_sizes AS
-                    SELECT file_id,
-                           nth,
-                           length(data) AS size
-                      FROM dagon_storage_file_data
-                ''',
-                r'''
-                CREATE VIEW dagon_file_sizes AS
-                    SELECT file_id,
-                           sum(size) AS size
-                      FROM dagon_file_data_sizes
-                  GROUP BY file_id
-                ''',
-                r'''
-                CREATE VIEW dagon_sized_files AS
-                    SELECT * FROM dagon_storage_files
-                             NATURAL JOIN dagon_file_sizes
-                ''',
-            ])
+            _migrate_db(db.database)
         return util.AsyncNullContext(None)
 
 
@@ -300,15 +305,16 @@ if TYPE_CHECKING:
 
 
 @asynccontextmanager
-async def open_db_storage(*,
-                          db: Optional[db_mod.Database] = None,
-                          run_id: Optional[int] = None) -> AsyncIterator[IFileStorage]:
+async def _open_db_storage(*,
+                           db: Optional[db_mod.Database] = None,
+                           run_id: Optional[int] = None) -> AsyncIterator[IFileStorage]:
     if db is None or run_id is None:
         dbctx = db_mod.global_context_data()
         if not dbctx:
             raise RuntimeError('open_db_storage() requires a database argument or to be called within a task context')
         db = db or dbctx.database
         run_id = run_id if run_id is not None else dbctx.run_id
+    _migrate_db(db)
     async with db.transaction_context():
         yield _DatabaseFileStorage(db, run_id)
 
@@ -321,7 +327,7 @@ async def _ensure_storage(st: IFileStorage | None) -> AsyncIterator[IFileStorage
 
     dbctx = db_mod.global_context_data()
     if dbctx is None:
-        raise RuntimeError(f'Invalid attempt to use database storage outside of a task context')
+        raise RuntimeError('Invalid attempt to use database storage outside of a task context')
     db = dbctx.database
     async with db.transaction_context():
         yield _DatabaseFileStorage(db, dbctx.run_id)
