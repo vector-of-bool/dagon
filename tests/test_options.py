@@ -10,7 +10,7 @@ import pytest
 def test_no_option_value():
     o = option.add('foo', int)
 
-    @task.define(default=True)
+    @task.define()
     async def foo():
         with pytest.raises(option.NoOptionValueError):
             o.get()
@@ -18,7 +18,7 @@ def test_no_option_value():
         assert o.get(default='123') == '123'
         assert o.get(default_factory=lambda: 'abcd') == 'abcd'
 
-    unused(foo)
+    return [foo]
 
 
 @dag_test(['-obar=12'])
@@ -26,7 +26,7 @@ def test_option_with_default_value():
     foo = option.add('foo', int, default=42)
     bar = option.add('bar', int, default=91)
 
-    @task.define(default=True)
+    @task.define()
     async def get1():
         assert foo.get() == 42
         assert foo.get(default=7) == 42
@@ -35,7 +35,7 @@ def test_option_with_default_value():
         assert bar.get(default=999) == 12
         assert bar.get(default_factory=lambda: 'b') == 12
 
-    unused(get1)
+    return [get1]
 
 
 @dag_test(['-obar=12'])
@@ -43,7 +43,7 @@ def test_option_with_default_factory():
     foo = option.add('foo', int, default_factory=lambda: 42)
     bar = option.add('bar', int, default_factory=lambda: 91)
 
-    @task.define(default=True)
+    @task.define()
     async def get1():
         assert foo.get() == 42
         assert foo.get(default=7) == 42
@@ -52,7 +52,7 @@ def test_option_with_default_factory():
         assert bar.get(default=999) == 12
         assert bar.get(default_factory=lambda: 'b') == 12
 
-    unused(get1)
+    return [get1]
 
 
 @dag_test()
@@ -61,7 +61,7 @@ def test_option_factory_is_called():
     foo = option.add('foo', int, default_factory=lambda: first((42, dat.append(1))))
     bar = option.add('bar', int)
 
-    @task.define(default=True)
+    @task.define()
     async def get1():
         assert len(dat) == 1
         assert foo.get() == 42
@@ -74,4 +74,4 @@ def test_option_factory_is_called():
         assert bar.get(default_factory=lambda: first((23, dat.append(4)))) == 23
         assert len(dat) == 5
 
-    unused(get1)
+    return [get1]
