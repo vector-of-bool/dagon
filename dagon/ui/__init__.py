@@ -6,9 +6,10 @@ import builtins
 import argparse
 import warnings
 from contextlib import AsyncExitStack, ExitStack, asynccontextmanager
-from typing import Any, AsyncIterator, Awaitable, Iterable, cast
+from typing import Any, AsyncIterator, Awaitable, cast
 
 from dagon.core.result import NodeResult
+from dagon.ext import loader
 from dagon.ui.events import ProgressInfo, UIEvents
 from dagon.ui.message import Message, MessageType
 
@@ -17,12 +18,12 @@ from ..ext.iface import OpaqueTaskGraphView
 from ..task.dag import OpaqueTask
 from ..util import AsyncNullContext, Opaque, ReadyAwaitable, unused
 from .iface import I_UIExtension
-from .proc import ProcessResultUIInfo
+from .proc import PrintProcessResultUIInfo
 
-if sys.version_info < (3, 10):
-    from importlib_metadata import EntryPoint, entry_points
+if sys.version_info < (3, 8):
+    from importlib_metadata import EntryPoint
 else:
-    from importlib.metadata import EntryPoint, entry_points
+    from importlib.metadata import EntryPoint
 
 
 class UILoadWarning(Warning):
@@ -54,7 +55,7 @@ class _Ext(BaseExtension[None, I_UIExtension, None]):
     dagon_ext_requires = ['dagon.events']
 
     def __init__(self) -> None:
-        eps = cast(Iterable[EntryPoint], entry_points(group='dagon.uis'))
+        eps = loader.get_entry_points('dagon.uis')
         self._uis: dict[str, I_UIExtension] = {}
         self._chosen_ui: str | None = None
         for ep in eps:
@@ -66,7 +67,7 @@ class _Ext(BaseExtension[None, I_UIExtension, None]):
     def _try_load_one(ep: EntryPoint) -> None | I_UIExtension:
         ep_name: str = getattr(ep, 'name', '<unnamed>')
         try:
-            cls: Opaque = ep.load()
+            cls: Opaque = cast(Opaque, ep.load())
         except BaseException as e:
             warnings.warn(f"An exception occurred while trying to load Dagon UI extension {ep!r}: {e}",
                           UILoadWarning,
@@ -149,8 +150,8 @@ def progress(value: float | None) -> None:
     _EVENTS.progress.emit(ProgressInfo(value))
 
 
-def process_done(result: ProcessResultUIInfo) -> None:
-    _EVENTS.process_done.emit(result)
+def print_process_done(result: PrintProcessResultUIInfo) -> None:
+    _EVENTS.print_process_done.emit(result)
 
 
 unused(_Ext)

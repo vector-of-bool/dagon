@@ -15,16 +15,17 @@ import signal
 import subprocess
 import warnings
 from pathlib import Path, PurePath
-from typing import (Any, Callable, Iterable, Mapping, NamedTuple, Sequence, Union, cast)
+from typing import (Callable, Iterable, Mapping, NamedTuple, Sequence, Union, cast)
 
 from typing_extensions import Literal, Protocol
 
-from .. import db as db_mod
 from .. import ui
+from ..event import Event, events
 from ..event.cancel import CancellationToken, CancelLevel, raise_if_cancelled
 from ..fs import Pathish
-from ..task import (DependsArg, Task, TaskDAG, current_dag, iter_deps)
-from ..ui.message import MessageType
+from ..task import DependsArg, Task, TaskDAG, current_dag, iter_deps
+from ..ui import MessageType
+from ..util import JSONValue
 
 _AioProcess = asyncio.subprocess.Process
 
@@ -50,6 +51,9 @@ class ProcessOutputItem(NamedTuple):
 
 LineHandler = Callable[[ProcessOutputItem], None]
 
+_INTERRUPT_SIGNUM = signal.SIGINT if os.name != 'nt' else signal.CTRL_C_EVENT
+OS_PREFERRED_NEWLINE = b'\r\n' if os.name == 'nt' else b'\n'
+
 
 class ProcessResult(Protocol):
     """
@@ -66,7 +70,7 @@ class ProcessResult(Protocol):
         "The output records of the subprocess"
         ...
 
-    def stdout_json(self) -> Any:
+    def stdout_json(self) -> JSONValue:
         "Interpret the output as JSON data."
         ...
 
@@ -75,7 +79,7 @@ class _ProcessResultTup(NamedTuple):
     retcode: int
     output: Sequence[ProcessOutputItem]
 
-    def stdout_json(self) -> Any:
+    def stdout_json(self) -> JSONValue:
         dat = b''.join(i.out for i in self.output if i.kind == 'output')
         return json.loads(dat)
 
@@ -201,7 +205,7 @@ class RunningProcess:
         if self._done:
             return
         try:
-            self.send_signal(signal.SIGINT, to_pgrp=True)
+            self.send_signal(_INTERRUPT_SIGNUM, to_pgrp=True)
         except ProcessLookupError:
             return
         else:
@@ -249,6 +253,15 @@ class RunningProcess:
                 await self._pipe.stdin.drain()
                 self._pipe.stdin.close()
         return await self.result
+
+
+class CompletedProcess(NamedTuple):
+    start_time: datetime.datetime
+    end_time: datetime.datetime
+    command: Sequence[str]
+    cwd: Path
+    result: ProcessResult
+    process: RunningProcess
 
 
 def arg_to_string(item: CommandArg) -> str:
@@ -318,34 +331,16 @@ def get_effective_env(env: Mapping[str, str] | None, *, merge: bool = True) -> d
     return final_env
 
 
-def _record_proc(db: db_mod.Database, task_run_id: db_mod.TaskRunID, cmd: Sequence[str], start_time: datetime.datetime,
-                 cwd: Path, result: ProcessResult) -> None:
-    iv = db.new_interval(task_run_id, f'Subprocess {cmd}', start_time)
-    end_time = datetime.datetime.now()
-    dur = end_time - start_time
-    pid = db.store_proc_execution(
-        task_run_id,
-        cmd=cmd,
-        cwd=cwd,
-        output=result.output,
-        retc=result.retcode,
-        start_time=start_time,
-        duration=dur.total_seconds(),
-    )
-    meta = {'process_id': pid}
-    db.set_interval_meta(iv, meta)
-    db.set_interval_end(iv, end_time)
+_PrintOnFinishArg = Literal['always', 'never', 'on-fail', None]
 
 
-def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, record: bool, print_output_on_finish: bool,
+def _proc_done(cmd: Sequence[str], start_time: datetime.datetime, cwd: Path, print_output_on_finish: _PrintOnFinishArg,
                result: ProcessResult, proc: RunningProcess, next_handler: ProcessCompletionCallback) -> None:
-    gctx = db_mod.global_context_data()
-    tctx = db_mod.task_context_data()
-    if record and gctx and tctx:
-        # Store this process execution in the database
-        _record_proc(gctx.database, tctx.task_run_id, cmd, start_time, cwd, result)
-    if print_output_on_finish:
-        ui.process_done(ui.ProcessResultUIInfo(cmd, result.retcode, result.output))
+    end_time = datetime.datetime.now()
+    ev: Event[CompletedProcess] = events.get_or_register('dagon.proc.done', Event)
+    ev.emit(CompletedProcess(start_time, end_time, cmd, cwd, result, proc))
+    if (print_output_on_finish == 'always' or (print_output_on_finish == 'on-fail' and result.retcode != 0)):
+        ui.print_process_done(ui.PrintProcessResultUIInfo(cmd, result.retcode, result.output))
     next_handler(proc, result)
 
 
@@ -357,8 +352,7 @@ async def spawn(cmd: CommandLine,
                 stdin_pipe: bool = False,
                 on_output: OutputMode | LineHandler | None = None,
                 on_done: ProcessCompletionCallback | None = None,
-                print_output_on_finish: bool | None = None,
-                record: bool = True,
+                print_output_on_finish: _PrintOnFinishArg = None,
                 cancel: CancellationToken | None = None,
                 timeout: datetime.timedelta | None = None) -> RunningProcess:
     """
@@ -426,12 +420,14 @@ async def spawn(cmd: CommandLine,
     start_time = datetime.datetime.now()
     cwd_ = cwd
     if print_output_on_finish is None:
-        print_output_on_finish = on_output == 'accumulate'
+        if on_output == 'accumulate':
+            print_output_on_finish = 'always'
+        else:
+            print_output_on_finish = 'on-fail'
     # Call _proc_done when the process completes
-    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, record, print_output_on_finish, p1, p0,
-                                        prev_on_done)
+    on_done = lambda p0, p1: _proc_done(cmd_plain, start_time, cwd_, print_output_on_finish, p1, p0, prev_on_done)
 
-    on_line = as_line_handler(on_output)
+    on_line = _as_line_handler(on_output)
 
     # Spawn that subprocess!
     proc = await asyncio.create_subprocess_exec(
@@ -448,12 +444,11 @@ async def spawn(cmd: CommandLine,
     if cancel is not None:
 
         def cancel_it(_lvl: CancelLevel) -> None:
-            if os.name != 'nt':
-                try:
-                    ret.send_signal(signal.SIGINT, to_pgrp=True)
-                except ProcessLookupError:
-                    # The process is already dead. We're okay.
-                    pass
+            try:
+                ret.send_signal(_INTERRUPT_SIGNUM, to_pgrp=True)
+            except ProcessLookupError:
+                # The process is already dead. We're okay.
+                pass
             ret.mark_cancelled()
 
         token = cancel.connect(cancel_it)
@@ -464,12 +459,17 @@ async def spawn(cmd: CommandLine,
 
 class _UpdateStatus:
     def __call__(self, line: ProcessOutputItem) -> None:
-        ui.status(line.out.decode(errors='?'))
+        ui.status(line.out.decode(errors='?').strip())
 
 
 class _LogLine:
     def __call__(self, line: ProcessOutputItem) -> None:
-        ui.print(line.out.decode(errors='?'), type=MessageType.Error if line.kind == 'error' else MessageType.Print)
+        data = line.out
+        if data.endswith(b'\r\n'):
+            data = data[:-2]
+        elif data.endswith(b'\n'):
+            data = data[:-1]
+        ui.print(data.decode(errors='?'), type=MessageType.Error if line.kind == 'error' else MessageType.Print)
 
 
 PRINT_OUTPUT: LineHandler = _LogLine()
@@ -485,8 +485,7 @@ async def run(cmd: CommandLine,
               check: bool = True,
               on_output: LineHandler | OutputMode | None = None,
               on_done: ProcessCompletionCallback | None = None,
-              print_output_on_finish: bool | None = None,
-              record: bool = True,
+              print_output_on_finish: _PrintOnFinishArg = None,
               cancel: CancellationToken | None = None,
               timeout: datetime.timedelta | None = None) -> ProcessResult:
     """
@@ -512,7 +511,6 @@ async def run(cmd: CommandLine,
         on_output=on_output,
         on_done=on_done,
         print_output_on_finish=print_output_on_finish,
-        record=record,
         cancel=cancel,
         timeout=timeout,
     )
@@ -530,20 +528,20 @@ async def run(cmd: CommandLine,
     return result
 
 
-def define_cmd_task(name: str,
-                    cmd: CommandLine,
-                    *,
-                    dag: TaskDAG | None = None,
-                    cwd: Pathish | None = None,
-                    doc: str = '',
-                    on_output: LineHandler | OutputMode | None = 'accumulate',
-                    print_output_on_finish: bool | None = None,
-                    check: bool = True,
-                    default: bool = False,
-                    depends: DependsArg = (),
-                    env: dict[str, str] | None = None,
-                    order_only_depends: DependsArg = (),
-                    disabled_reason: str | None = None) -> Task[ProcessResult]:
+def cmd_task(name: str,
+             cmd: CommandLine,
+             *,
+             dag: TaskDAG | None = None,
+             cwd: Pathish | None = None,
+             doc: str = '',
+             on_output: LineHandler | OutputMode | None = 'accumulate',
+             print_output_on_finish: _PrintOnFinishArg = None,
+             check: bool = True,
+             default: bool = False,
+             depends: DependsArg = (),
+             env: dict[str, str] | None = None,
+             order_only_depends: DependsArg = (),
+             disabled_reason: str | None = None) -> Task[ProcessResult]:
     """
     Declare a task that executes the given command. See
     :func:`dagon.task.define` and :func:`run` for parameter information.
@@ -580,7 +578,7 @@ def define_cmd_task(name: str,
     return t
 
 
-def as_line_handler(l: LineHandler | OutputMode | None) -> LineHandler | None:
+def _as_line_handler(l: LineHandler | OutputMode | None) -> LineHandler | None:
     if l is None:
         return None
     if callable(l):

@@ -13,30 +13,30 @@ import tarfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
-from typing import (IO, Awaitable, Callable, Iterable, NamedTuple, Sequence, TypeVar, Union, cast)
+from typing import (IO, Awaitable, Callable, Iterable, NamedTuple, Union, cast)
+
 from typing_extensions import Literal
 
 from .. import fs
-from ..event import CancellationToken, Event, raise_if_cancelled
+from ..event import CancellationToken, raise_if_cancelled, Handler
 from ..fs import FilePredicate, IfDirectoryExists, IfExists, Pathish
+from ..util import T, Opaque, unused
 
 _AR_OPS_POOL = ThreadPoolExecutor(4)
-
-T = TypeVar('T')
 
 
 class ExtractInfo(NamedTuple):
     """
     Information about the extraction of a file from an archive.
     """
-    #: Path within the archive from where the item was extracted
     ar_path: PurePosixPath
-    #: Path on the system to where the item was extracted
+    "Path within the archive from where the item was extracted"
     dest_path: Path
-    #: The index of the file in the extraction process.
+    "Path on the system to where the item was extracted"
     n: int
-    #: The total number of files that will be extracted.
+    "The index of the file in the extraction process."
     total_count: int
+    "The total number of files that will be extracted."
 
 
 class AddInfo(NamedTuple):
@@ -47,32 +47,21 @@ class AddInfo(NamedTuple):
     "Path within the archive that the file is being written to"
 
 
-ExtractFileEvent = Event[ExtractInfo]
-AddFileEvent = Event[AddInfo]
-
-
-def ar_thread_pool() -> ThreadPoolExecutor:
-    """
-    The thread pool used to execute archive operations
-    """
-    return _AR_OPS_POOL
-
-
 def _run_ar_op(fn: Callable[[], T]) -> Awaitable[T]:
     loop = asyncio.get_event_loop()
-    return loop.run_in_executor(ar_thread_pool(), fn)
+    return loop.run_in_executor(_AR_OPS_POOL, fn)
 
 
-Format = Literal['zip', 'tgz', 'tbz', 'txz']
-FormatOrAuto = Literal[Format, 'auto']
+_FormatName = Literal['zip', 'tgz', 'tbz', 'txz']
+_FormatOrAuto = Literal[_FormatName, 'auto']
 
 
-def is_tar_format(fmt: Format) -> bool:
+def _is_tar_format(fmt: _FormatName) -> bool:
     """Return ``True`` iff this archive is a tarfile format archive."""
     return fmt in ('tgz', 'tbz', 'txz')
 
 
-class _Mode(enum.Enum):
+class _OpenMode(enum.Enum):
     """
     The open-mode for an archive.
     """
@@ -84,18 +73,18 @@ class _Mode(enum.Enum):
     Append = 'append'
 
 
-def _open_zip(path: Path, mode: _Mode) -> zipfile.ZipFile:
+def _open_zip(path: Path, mode: _OpenMode) -> zipfile.ZipFile:
     """Return an opened ZipFile"""
     mode_str = {
-        _Mode.Append: 'a',
-        _Mode.WriteNew: 'w',
-        _Mode.Read: 'r',
+        _OpenMode.Append: 'a',
+        _OpenMode.WriteNew: 'w',
+        _OpenMode.Read: 'r',
     }[mode]
     mode_str = cast(Literal['a'], mode_str)
     return zipfile.ZipFile(str(path), mode_str, zipfile.ZIP_DEFLATED)
 
 
-def _open_tar(path: Path, mode: _Mode, format_: Format) -> tarfile.TarFile:
+def _open_tar(path: Path, mode: _OpenMode, format_: _FormatName) -> tarfile.TarFile:
     """Return an opened TarFile with the appropriate compression"""
     algo_str = {
         'tgz': 'gz',
@@ -103,9 +92,9 @@ def _open_tar(path: Path, mode: _Mode, format_: Format) -> tarfile.TarFile:
         'txz': 'xz',
     }[format_]
     mode_str = {
-        _Mode.Read: 'r:' + algo_str,
-        _Mode.Append: 'a:',
-        _Mode.WriteNew: 'w:' + algo_str,
+        _OpenMode.Read: 'r:' + algo_str,
+        _OpenMode.Append: 'a:',
+        _OpenMode.WriteNew: 'w:' + algo_str,
     }[mode]
     return tarfile.open(str(path), mode_str)
 
@@ -134,37 +123,41 @@ class MemberFromBytes(NamedTuple):
 NewMember = Union[MemberFromFile, MemberFromBytes]
 
 
-def _add_to_tar(tf: tarfile.TarFile, item: NewMember, on_add: AddFileEvent | None) -> None:
+def _add_to_tar(tf: tarfile.TarFile, item: NewMember) -> None:
     """Add the given item to a tar archive file"""
-    if on_add:
-        on_add.emit(AddInfo(PurePosixPath(item.ar_path)))
     if isinstance(item, MemberFromFile):
         tf.add(str(item.path), str(item.ar_path) if item.ar_path else None)
-    else:
-        assert isinstance(item, MemberFromBytes), f'Invalid item for tar archive {item!r}'
-        info = tarfile.TarInfo(str(item.ar_path))
-        buf = item.content
-        if isinstance(buf, str):
-            buf = buf.encode('utf-8')
-        info.size = len(buf)
-        bio = io.BytesIO(buf)
-        tf.addfile(info, bio)
+        return
+
+    # Adding a bytes object
+    assert isinstance(item, MemberFromBytes), f'Invalid item for tar archive {item!r}'
+    info = tarfile.TarInfo(str(item.ar_path))
+    buf = item.content
+    if isinstance(buf, str):
+        buf = buf.encode('utf-8')
+    info.size = len(buf)
+    bio = io.BytesIO(buf)
+    tf.addfile(info, bio)
 
 
-def _create_tar(path: Path, items: Iterable[NewMember], format: Format, on_add: AddFileEvent | None,
-                cancel: CancellationToken | None) -> Path:
+async def _create_tar(path: Path, items: Iterable[NewMember], format: _FormatName, on_add: Handler[AddInfo] | None,
+                      cancel: CancellationToken | None) -> Path:
     """Create a tar archive for the given items."""
-    with _open_tar(path, _Mode.WriteNew, format) as tfd:
+    with _open_tar(path, _OpenMode.WriteNew, format) as tfd:
         for item in items:
             raise_if_cancelled(cancel)
-            _add_to_tar(tfd, item, on_add)
+            if on_add:
+                on_add(AddInfo(PurePosixPath(item.ar_path)))
+            f = lambda: _add_to_tar(tfd, item)
+            if _uncompressed_size(item) < 1024 * 1024:
+                f()
+            else:
+                await _run_ar_op(f)
     return path
 
 
-def _add_to_zip(zfd: zipfile.ZipFile, item: NewMember, on_add: AddFileEvent | None) -> None:
+def _add_to_zip(zfd: zipfile.ZipFile, item: NewMember) -> None:
     """Add a single item to a Zip archive"""
-    if on_add:
-        on_add.emit(AddInfo(PurePosixPath(item.ar_path)))
     if isinstance(item, MemberFromFile):
         zfd.write(str(item.path), str(item.ar_path) if item.ar_path else None)
     else:
@@ -173,17 +166,23 @@ def _add_to_zip(zfd: zipfile.ZipFile, item: NewMember, on_add: AddFileEvent | No
         zfd.writestr(str(item.ar_path), buf)
 
 
-def _create_zip(path: Path, items: Iterable[NewMember], on_add: AddFileEvent | None,
-                cancel: CancellationToken | None) -> Path:
+async def _create_zip(path: Path, items: Iterable[NewMember], on_add: Handler[AddInfo] | None,
+                      cancel: CancellationToken | None) -> Path:
     """Create a zip archive for the given items"""
-    with _open_zip(path, _Mode.WriteNew) as zfd:
+    with _open_zip(path, _OpenMode.WriteNew) as zfd:
         for item in items:
+            if on_add:
+                on_add(AddInfo(PurePosixPath(item.ar_path)))
             raise_if_cancelled(cancel)
-            _add_to_zip(zfd, item, on_add)
+            f = lambda: _add_to_zip(zfd, item)
+            if _uncompressed_size(item) < 1024 * 1024:
+                f()
+            else:
+                await _run_ar_op(f)
     return path
 
 
-def _get_format(path: Path, format_: FormatOrAuto) -> Format:
+def _get_format(path: Path, format_: _FormatOrAuto) -> _FormatName:
     """Get the format to use with ``path``"""
     if format_ != 'auto':
         return format_
@@ -201,8 +200,8 @@ def _get_format(path: Path, format_: FormatOrAuto) -> Format:
 async def create(path: Pathish,
                  items: Iterable[NewMember],
                  *,
-                 format: FormatOrAuto = 'auto',
-                 on_add: AddFileEvent | None = None,
+                 format: _FormatOrAuto = 'auto',
+                 on_add: Handler[AddInfo] | None = None,
                  cancel: CancellationToken | None = None) -> Path:
     """
     Create an archive.
@@ -220,10 +219,11 @@ async def create(path: Pathish,
     path = Path(path)
     format = _get_format(path, format)
 
-    if is_tar_format(format):
-        return await _run_ar_op(lambda: _create_tar(Path(path), items, cast(Format, format), on_add, cancel))
+    cancel = cancel or CancellationToken.get_context_local()
+    if _is_tar_format(format):
+        return await _create_tar(Path(path), items, cast(_FormatName, format), on_add, cancel)
     if format == 'zip':
-        return await _run_ar_op(lambda: _create_zip(Path(path), items, on_add, cancel))
+        return await _create_zip(Path(path), items, on_add, cancel)
     raise RuntimeError(f'Invalid `format` given ({repr(format)})')
 
 
@@ -262,7 +262,7 @@ async def create_from_dir(dirpath: Pathish,
                           only_if: FilePredicate | None = None,
                           unless: FilePredicate | None = None,
                           prefix: PurePosixPath | str | None = None,
-                          format: FormatOrAuto = 'auto',
+                          format: _FormatOrAuto = 'auto',
                           cancel: CancellationToken | None = None) -> Path:
     """
     Create an archive from the contents of a directory.
@@ -335,7 +335,7 @@ def _write_file(fd: IO[bytes], dest: Path) -> None:
     dest.parent.mkdir(exist_ok=True, parents=True)
     with dest.open('wb') as out:
         while True:
-            buf = fd.read(1024 * 1)
+            buf = fd.read(1024 * 8)
             if not buf:
                 break
             out.write(buf)
@@ -348,6 +348,16 @@ def _path_of(m: MemInfo) -> Path:
     if isinstance(m, tarfile.TarInfo):
         return Path(m.name)
     return Path(m.filename)
+
+
+def _uncompressed_size(m: MemInfo | NewMember) -> int:
+    if isinstance(m, tarfile.TarInfo):
+        return m.size
+    if isinstance(m, MemberFromBytes):
+        return len(m.content)
+    if isinstance(m, MemberFromFile):
+        return os.stat(m.path).st_size
+    return m.file_size
 
 
 def _is_dir(m: MemInfo) -> bool:
@@ -380,13 +390,12 @@ async def _expand_archive(
     strip_components: int,
     if_file_exists: IfExists,
     cancel: CancellationToken | None,
-    on_extract: ExtractFileEvent | None,
+    on_extract: Handler[ExtractInfo] | None,
 ) -> Path:
     # Switch based on archive type
     is_tar = isinstance(archive, tarfile.TarFile)
 
-    all_members = cast(Sequence[Union[zipfile.ZipInfo, tarfile.TarInfo]],
-                       archive.getmembers() if is_tar else archive.infolist())  # type: ignore
+    all_members = archive.getmembers() if is_tar else archive.infolist()
     filtered = (mem for mem in all_members if (only_if(_path_of(mem)) and not unless(_path_of(mem))))
 
     dest_map: list[tuple[Union[zipfile.ZipInfo, tarfile.TarInfo], Path]] = []
@@ -395,21 +404,27 @@ async def _expand_archive(
         path_elems = PurePosixPath(_path_of(member)).parts
         new_elems = path_elems[min(strip_components, len(path_elems)):]
         if not len(new_elems):
+            # strip_components removed all path components
             continue
         new_dest = functools.reduce(lambda a, b: a / b, new_elems, dest)
-        if new_dest.exists():
-            if if_file_exists == 'fail':
-                raise FileExistsError(f'Destination file already exists: {new_dest}')
-            if if_file_exists == 'keep':
-                # Skip this archive member
-                continue
-            if if_file_exists == 'replace':
-                if _is_dir(member):
-                    # We keep around directories, since we want to merge over the top of them
-                    pass
-                else:
-                    os.unlink(new_dest)
-        dest_map.append((member, new_dest))
+        if not new_dest.exists():
+            dest_map.append((member, new_dest))
+        elif if_file_exists == 'fail':
+            raise FileExistsError(f'Destination file already exists: {new_dest}')
+        elif if_file_exists == 'keep':
+            # Skip this archive member
+            continue
+        elif if_file_exists == 'replace':
+            if _is_dir(member):
+                # We keep around directories, since we want to merge over the top of them
+                pass
+            else:
+                # We're replacing the file
+                os.unlink(new_dest)
+                dest_map.append((member, new_dest))
+        else:
+            never: Opaque = if_file_exists
+            unused(never)
 
     dirs: list[tuple[tarfile.TarInfo, Path]] = []
 
@@ -418,11 +433,19 @@ async def _expand_archive(
         mem, dest_filepath = pair
         if on_extract:
             info = ExtractInfo(PurePosixPath(_path_of(mem)), dest_filepath, idx, len(dest_map))
-            on_extract.emit(info)
+            on_extract(info)
         if _is_file(mem):
             fd = _open(archive, mem)
             assert fd
-            await _run_ar_op(lambda: _write_file(fd, dest_filepath))  # pylint: disable=cell-var-from-loop
+            if _uncompressed_size(mem) < 1024 * 1024:
+                # Do the work without the threadpool
+                _write_file(fd, dest_filepath)
+            else:
+                await _run_ar_op(lambda: _write_file(fd, dest_filepath))  # pylint: disable=cell-var-from-loop
+            if is_tar:
+                assert isinstance(mem, tarfile.TarInfo)
+                os.chmod(dest_filepath, mem.mode)
+                os.utime(dest_filepath, (mem.mtime, mem.mtime))
         if _is_dir(mem) and is_tar:
             assert isinstance(mem, tarfile.TarInfo)
             dirs.append((mem, Path(dest_filepath)))
@@ -443,11 +466,11 @@ async def expand(path: Pathish,
                  only_if: FilePredicate | None = None,
                  unless: FilePredicate | None = None,
                  strip_components: int = 0,
-                 format: FormatOrAuto = 'auto',
+                 format: _FormatOrAuto = 'auto',
                  if_exists: IfDirectoryExists = 'fail',
                  if_file_exists: IfExists = 'fail',
                  cancel: CancellationToken | None = None,
-                 on_extract: ExtractFileEvent | None = None) -> Path:
+                 on_extract: Handler[ExtractInfo] | Literal['print-status'] | None = None) -> Path:
     """
     Expand the contents of an archive into a directory.
 
@@ -486,12 +509,16 @@ async def expand(path: Pathish,
         return destination
 
     archive: Union[zipfile.ZipFile, tarfile.TarFile]
-    if is_tar_format(format):
+    if _is_tar_format(format):
         archive = tarfile.open(path, 'r:*')
     elif format == 'zip':
         archive = zipfile.ZipFile(path, 'r')
     else:
         raise RuntimeError(f'Unknown archive format spec: {repr(format)}')
+
+    if on_extract == 'print-status':
+        from dagon import ui
+        on_extract = lambda ev: (ui.status(f'Extract [{ev.ar_path}]'), ui.progress(ev.n / ev.total_count))
 
     return await _expand_archive(
         archive,
@@ -500,6 +527,6 @@ async def expand(path: Pathish,
         unless or (lambda _: False),
         strip_components,
         if_file_exists,
-        cancel,
+        cancel or CancellationToken.get_context_local(),
         on_extract,
     )

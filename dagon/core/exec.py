@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Any, AsyncContextManager, Awaitable, Callable, Generic, Mapping, cast
+from contextlib import AsyncExitStack, asynccontextmanager
+from typing import Any, AsyncIterator, Awaitable, Callable, Generic, Mapping, cast
 
-from ..util import AsyncNullContext, Opaque, ensure_awaitable, unused
+from ..util import Opaque, ensure_awaitable
 from .ll_dag import LowLevelDAG, NodeT
 from .result import Cancellation, ExceptionInfo, Failure, NodeResult, Success
 
@@ -59,20 +59,14 @@ class SimpleExecutor(Generic[NodeT]):
                  exec_fn: NodeExecutorFunction[NodeT],
                  *,
                  loop: asyncio.AbstractEventLoop | None = None) -> None:
-        loop = loop or asyncio.get_event_loop()
         self.__graph = graph
         'Our graph'
         self.__exec_fn = cast(Callable[[NodeT], 'Opaque | Awaitable[Opaque]'], exec_fn)
         'The node-executing function'
         self.__running: set[asyncio.Task[NodeResult[NodeT]]] = set()
         'The set of :class:`asyncio.Task` tasks that map to currently running nodes'
-        self.__futures: dict[NodeT, 'asyncio.Future[NodeResult[NodeT]]'] = {
-            t: asyncio.Future(loop=loop)
-            for t in graph.all_nodes
-        }
+        self.__futures: dict[NodeT, 'asyncio.Future[NodeResult[NodeT]]'] = {}
         'The result map for all nodes'
-        self.__loop = loop
-        'The event loop for this executor'
         self.__any_failed = False
         'Whether any nodes have failed'
         self.__started = False
@@ -99,11 +93,6 @@ class SimpleExecutor(Generic[NodeT]):
     def has_running_work(self) -> bool:
         """Whether there is currently any running work"""
         return bool(self.__running)
-
-    @property
-    def loop(self) -> asyncio.AbstractEventLoop:
-        """The event loop associated with this executor"""
-        return self.__loop
 
     @property
     def any_failed(self) -> bool:
@@ -137,7 +126,8 @@ class SimpleExecutor(Generic[NodeT]):
         Enqueue all ready tasks in the associated task graph.
         """
         nodes_to_start = list(self.__graph.ready_nodes)
-        new_tasks = set(self.loop.create_task(self.do_run_node(n)) for n in nodes_to_start)
+        tasks_gen = (asyncio.get_running_loop().create_task(self.do_run_node(n)) for n in nodes_to_start)
+        new_tasks = set(tasks_gen)
         for n in nodes_to_start:
             self.__graph.mark_running(n)
         self.__running |= new_tasks
@@ -231,15 +221,16 @@ class SimpleExecutor(Generic[NodeT]):
         """
         Like `.run_all` but calls :func:`asyncio.run` with the coroutine.
         """
-        return self.loop.run_until_complete(self.run_all())
+        return asyncio.run(self.run_all())
 
     def run_some_until_complete(self) -> Mapping[NodeT, NodeResult[NodeT]]:
         """
         Like `.run_some` but calls :func:`asyncio.run` with the coroutine.
         """
-        return self.loop.run_until_complete(self.run_some())
+        return asyncio.run(self.run_some())
 
-    def running_context(self) -> AsyncContextManager[None]:
+    @asynccontextmanager
+    async def running_context(self) -> AsyncIterator[None]:
         """
         A context manager that is in scope while the graph is running, and
         exited when the graph finishes execution.
@@ -247,11 +238,10 @@ class SimpleExecutor(Generic[NodeT]):
         This method is a no-op by default. It is intended to be overridden by a
         derived class.
         """
-        if TYPE_CHECKING:
-            unused(self)
-        return AsyncNullContext()
+        self.__futures = {t: asyncio.get_running_loop().create_future() for t in self.__graph.all_nodes}
+        yield
 
-    def do_run_node(self, node: NodeT) -> Awaitable[NodeResult[NodeT]]:
+    async def do_run_node(self, node: NodeT) -> NodeResult[NodeT]:
         """
         Customization layer for handling node execution. Derived classes may
         override this method to intercept nodes before and after they are
@@ -268,7 +258,7 @@ class SimpleExecutor(Generic[NodeT]):
             captured at a lower layer and enclosed in a `.Failure` inside of
             the `.NodeResult` returned by `.do_run_node`.
         """
-        return self._run_and_record(node)
+        return await self._run_and_record(node)
 
     async def _run_and_record(self, node: NodeT) -> NodeResult[NodeT]:
         "Run the task and capture all results"

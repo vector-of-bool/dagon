@@ -19,7 +19,7 @@ from dagon.ext.iface import OpaqueTaskGraphView
 from dagon.task.dag import OpaqueTask
 from dagon.ui.events import ProgressInfo, UIEvents
 from dagon.ui.message import Message, MessageType
-from dagon.ui.proc import ProcessResultUIInfo, make_proc_info_box
+from dagon.ui.proc import PrintProcessResultUIInfo, make_proc_info_box
 
 from . import ansi
 from .iface import I_UIExtension
@@ -110,7 +110,7 @@ class FancyUI:
             st.enter_context(events.status.connect(self._on_status))
             st.enter_context(cap.on_out.connect(lambda s: loop.call_soon_threadsafe(lambda: self._on_std_out(s))))
             st.enter_context(cap.on_err.connect(lambda s: loop.call_soon_threadsafe(lambda: self._on_std_out(s))))
-            st.enter_context(events.process_done.connect(self._on_proc_done))
+            st.enter_context(events.print_process_done.connect(self._on_proc_done))
             self._redraw()
             yield
 
@@ -323,7 +323,7 @@ class FancyUI:
         lbl.progress = progress
         self._schedule_redraw()
 
-    def _on_proc_done(self, result: ProcessResultUIInfo) -> None:
+    def _on_proc_done(self, result: PrintProcessResultUIInfo) -> None:
         for m in make_proc_info_box(result, max_width=ansi.get_term_width()):
             self._append_message(m)
         self._schedule_redraw()

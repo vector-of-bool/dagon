@@ -28,14 +28,15 @@ Event handling
 from __future__ import annotations
 
 from contextlib import asynccontextmanager, contextmanager
+import contextvars
 from typing import Any, AsyncIterator, Callable, Iterator
 
 from ..ext.base import BaseExtension
 from ..ext.iface import OpaqueTaskGraphView
 from ..task.dag import OpaqueTask
-from ..util import T
+from ..util import T, scope_set_contextvar, unused
 from .cancel import CancellationToken, CancelLevel, raise_if_cancelled
-from .event import ConnectionToken, Event, EventMap
+from .event import ConnectionToken, Event, EventMap, Handler
 
 __all__ = [
     'events',
@@ -45,11 +46,16 @@ __all__ = [
     'ConnectionToken',
     'CancelLevel',
     'EventMap',
+    'Handler',
     'interval_context',
     'interval_end',
     'interval_start',
     'mark',
 ]
+
+_DEFAULT_EV_MAP = EventMap()
+
+_EVENTS_CTX = contextvars.ContextVar[EventMap]('_EVENTS_CTX', default=_DEFAULT_EV_MAP)
 
 
 class _EventsExt(BaseExtension[None, EventMap, EventMap]):
@@ -57,26 +63,27 @@ class _EventsExt(BaseExtension[None, EventMap, EventMap]):
 
     @asynccontextmanager
     async def global_context(self, graph: OpaqueTaskGraphView) -> AsyncIterator[EventMap]:
-        map = EventMap()
-        with CancellationToken.ensure_context_local():
-            yield map
+        prev = _EVENTS_CTX.get()
+        map = prev.child()
+        with scope_set_contextvar(_EVENTS_CTX, map):
+            with CancellationToken.ensure_context_local():
+                yield map
 
     @asynccontextmanager
     async def task_context(self, task: OpaqueTask) -> AsyncIterator[EventMap]:
-        map = self.global_data().clone()
-        map.register('dagon.interval-start', Event[str]())
-        map.register('dagon.interval-end', Event[None]())
-        map.register('dagon.mark', Event[None]())
-        yield map
+        glb = self.global_data()
+        child = glb.child()
+        with scope_set_contextvar(_EVENTS_CTX, child):
+            child.register('dagon.interval-start', Event[str]())
+            child.register('dagon.interval-end', Event[None]())
+            child.register('dagon.mark', Event[None]())
+            yield child
 
 
 class _EventsContextLookup:
     @staticmethod
     def _ctx() -> EventMap:
-        try:
-            return _EventsExt.task_data()
-        except LookupError as e:
-            raise RuntimeError('Cannot use dagon.event.events outside of a task context!') from e
+        return _EVENTS_CTX.get()
 
     def __getitem__(self, key: str) -> Event[Any]:
         return self._ctx()[key]
@@ -84,7 +91,7 @@ class _EventsContextLookup:
     def get(self, key: str) -> Event[Any] | None:
         return self._ctx().get(key)
 
-    def get_or_register(self, name: str, factory: Callable[[], Event[T]]) -> Event[T]:
+    def get_or_register(self, name: str, factory: Callable[[], Event[T]] = Event[T]) -> Event[T]:
         return self._ctx().get_or_register(name, factory)
 
     def register(self, name: str, ev: Event[T]) -> Event[T]:
@@ -134,3 +141,6 @@ def mark(name: str) -> None:
     .. note:: May only be called within a task-executing context.
     """
     events['dagon.mark'].emit(name)
+
+
+unused(_EventsExt)

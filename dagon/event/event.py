@@ -93,9 +93,8 @@ class EventMap:
         """Determine whether there is an event `name`"""
         return name in self._events
 
-    def clone(self) -> EventMap:
-        e = EventMap(events=self._events)
-        return e
+    def child(self) -> EventMap:
+        return EventMap(events=dict(self._events))
 
     def register(self, name: str, event: Event[T]) -> Event[T]:
         """

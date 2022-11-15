@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Dagon Timeline - [[DAG_START_TIME]]</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+  <style>
+    {{TL_CSS}}
+  </style>
+</head>
+
+<body>
+  <div id="loading">
+
+  </div>
+
+  <template id="app-template">
+    <tl-app>
+      <tl-timeline id="timeline">
+        <div id="tracks-container"></div>
+        <div id="time-cursor">
+          <div class="label">0s</div>
+        </div>
+      </tl-timeline>
+
+      <div id="status-bar">Hover over a time strip for details</div>
+
+      <div class="controls">
+        <div class="zoom in">+</div>
+        <div class="zoom out">-</div>
+      </div>
+    </tl-app>
+  </template>
+
+  <template id="show-proc-template">
+    <tl-proc-view>
+      <div class="label">Command</div>
+      <div class="val cmd"></div>
+      <div class="label">Working directory</div>
+      <div class="val cwd"></div>
+      <div class="label">Exit code</div>
+      <div class="val rc">nil</div>
+      <div class="output"></div>
+      <div class="controls">
+        <div class="checkbox" id=word-wrap-container>
+          <input type="checkbox" name="Word Wrap" id="word-wrap">
+          <div>Word wrap</div>
+        </div>
+      </div>
+    </tl-proc-view>
+  </template>
+</body>
+
+<script>
+  var TIMELINE_DATA = JSON.parse(`[[TL_DATA]]`);
+  [[TL_SCRIPT]]
+</script>
+
+</html>

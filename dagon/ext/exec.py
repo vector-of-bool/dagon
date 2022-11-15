@@ -15,8 +15,9 @@ class ExtAwareExecutor(TaskExecutor[Opaque]):
     An extension-aware task executor. Executes a task graph and loads the appropriate
     extension contexts during execution
     """
-    def __init__(self, exts: ExtLoader, graph: ll_dag.LowLevelDAG[OpaqueTask], catch_signals: bool) -> None:
-        super().__init__(graph, self.__exec_task, catch_signals)
+    def __init__(self, exts: ExtLoader, graph: ll_dag.LowLevelDAG[OpaqueTask], *, catch_signals: bool,
+                 fail_cancels: bool) -> None:
+        super().__init__(graph, self.__exec_task, catch_signals=catch_signals, fail_cancels=fail_cancels)
         self._exts = exts
 
     async def __exec_task(self, task: OpaqueTask) -> Opaque:

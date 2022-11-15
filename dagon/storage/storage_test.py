@@ -85,13 +85,13 @@ class CaseSet_IFileStorage:
 
 class TestDatabaseFileStorage(CaseSet_IFileStorage):
     def do_create_storage(self, tmp_path: Path) -> AsyncContextManager[mod.IFileStorage]:
-        db = Database.get_or_create(':memory:')
-        return mod.open_db_storage(db=db, run_id=db.new_run_id())
+        db = Database.open(':memory:')
+        return mod._open_db_storage(db=db, run_id=db.new_run_id())
 
     def test_create_twice(self):
-        db = Database.get_or_create(':memory:')
-        mod.open_db_storage(db=db, run_id=1)
-        mod.open_db_storage(db=db, run_id=1)
+        db = Database.open(':memory:')
+        mod._open_db_storage(db=db, run_id=1)
+        mod._open_db_storage(db=db, run_id=1)
 
 
 class TestNativeFileStorage(CaseSet_IFileStorage):

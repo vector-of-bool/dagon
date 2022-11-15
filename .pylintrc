@@ -56,7 +56,7 @@ confidence=
 # --disable=W"
 # Disable `no-member`: We use mypy for that
 disable=C,too-few-public-methods,no-member,redefined-builtin,not-async-context-manager,\
-      invalid-sequence-index,unsubscriptable-object,unused-import
+      invalid-sequence-index,unsubscriptable-object,unused-import,invalid-overridden-method
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option

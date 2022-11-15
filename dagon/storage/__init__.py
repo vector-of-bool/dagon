@@ -8,12 +8,15 @@ import asyncio
 import sqlite3
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path, PosixPath, PurePosixPath
-from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Iterable, Optional)
+from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Iterable, Optional,
+                    overload)
 
-from typing_extensions import Protocol
+from typing_extensions import Literal, Protocol
 
-from .. import fs, util
 from .. import db as db_mod
+from .. import fs, util
+from ..ext.base import BaseExtension
+from ..ext.iface import OpaqueTaskGraphView
 from ..fs import IfExists, NPaths, Pathish, iter_pathish
 
 
@@ -32,6 +35,20 @@ class IFileStorage(Protocol):
     """
     Access to filesystem-like storage.
     """
+    @overload
+    def open_file_writer(self, fpath: Pathish) -> AsyncContextManager[IFileWriter]:
+        ...
+
+    @overload
+    def open_file_writer(self, fpath: Pathish, *, if_exists: Literal['fail',
+                                                                     'replace']) -> AsyncContextManager[IFileWriter]:
+        ...
+
+    @overload
+    def open_file_writer(self, fpath: Pathish, *,
+                         if_exists: Literal['keep']) -> AsyncContextManager[None | IFileWriter]:
+        ...
+
     def open_file_writer(self,
                          fpath: Pathish,
                          *,
@@ -84,53 +101,62 @@ class _DatabaseFileWriter:
         self._counter += 1
 
 
-_META_VERSION = 1
+def _migrate_db(db: db_mod.Database) -> None:
+    db_mod.apply_migrations(db.sqlite3_db, 'dagon_storage_meta', [
+        r'''
+        CREATE TABLE dagon_storage_files (
+            file_id INTEGER PRIMARY KEY,
+            run_id NOT NULL REFERENCES dagon_runs ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            UNIQUE(run_id, path)
+        )''',
+        r'''
+        CREATE TABLE dagon_storage_file_data (
+            data_id INTEGER PRIMARY KEY,
+            file_id NOT NULL REFERENCES dagon_storage_files ON DELETE CASCADE,
+            nth INTEGER NOT NULL,
+            data BLOB NOT NULL,
+            UNIQUE(file_id, nth)
+        )''',
+        r'''
+        CREATE VIEW dagon_file_data_sizes AS
+            SELECT file_id,
+                    nth,
+                    length(data) AS size
+                FROM dagon_storage_file_data
+        ''',
+        r'''
+        CREATE VIEW dagon_file_sizes AS
+            SELECT file_id,
+                    sum(size) AS size
+                FROM dagon_file_data_sizes
+            GROUP BY file_id
+        ''',
+        r'''
+        CREATE VIEW dagon_sized_files AS
+            SELECT * FROM dagon_storage_files
+                        NATURAL JOIN dagon_file_sizes
+        ''',
+    ])
 
 
-class _DatabaseFileStorage:
+class _Ext(BaseExtension[None, None, None]):
+    dagon_ext_name: str = 'dagon.storage'
+
+    def global_context(self, graph: 'OpaqueTaskGraphView') -> AsyncContextManager[None]:
+        db = db_mod.global_context_data()
+        if db:
+            _migrate_db(db.database)
+        return util.AsyncNullContext(None)
+
+
+util.unused(_Ext)
+
+
+class _DatabaseFileStorage(IFileStorage):
     def __init__(self, db: db_mod.Database, subkey: int) -> None:
         self._db = db
         self._subkey = subkey
-        self._migrate_dbstore(db)
-
-    @staticmethod
-    def _do_migrate_dbstore(db: db_mod.Database) -> None:
-        for s in [
-                'DROP TABLE IF EXISTS dagon_storage_files',
-                'DROP TABLE IF EXISTS dagon_storage_file_data',
-                r'''
-                CREATE TABLE dagon_storage_files (
-                    file_id INTEGER PRIMARY KEY,
-                    run_id NOT NULL REFERENCES dagon_runs ON DELETE CASCADE,
-                    path TEXT NOT NULL,
-                    UNIQUE(run_id, path)
-                )''',
-                r'''
-                CREATE TABLE dagon_storage_file_data (
-                    data_id INTEGER PRIMARY KEY,
-                    file_id NOT NULL REFERENCES dagon_storage_files ON DELETE CASCADE,
-                    nth INTEGER NOT NULL,
-                    data BLOB NOT NULL,
-                    UNIQUE(file_id, nth)
-                )''',
-        ]:
-            db(s)
-
-    @staticmethod
-    def _migrate_dbstore(db: db_mod.Database) -> None:
-        db.sqlite3_db.execute(r'''
-            CREATE TABLE IF NOT EXISTS dagon_storage_meta (
-                meta INTEGER NOT NULL
-            )
-        ''')
-        meta = list(db('SELECT meta FROM dagon_storage_meta'))
-        if meta and meta[0][0] == _META_VERSION:
-            # Database schema is up-to-date
-            return
-
-        with util.recursive_transaction(db.sqlite3_db):
-            _DatabaseFileStorage._do_migrate_dbstore(db)
-            db('INSERT INTO dagon_storage_meta(meta) VALUES (:ver)', ver=_META_VERSION)
 
     @asynccontextmanager
     async def read_file(self, fpath: Pathish) -> AsyncIterator[AsyncIterable[bytes]]:
@@ -207,6 +233,7 @@ class _DatabaseFileStorage:
                 raise FileExistsError(fpath) from e
             raise
         file_id = c.lastrowid
+        assert file_id is not None
         fw: IFileWriter = _DatabaseFileWriter(c, file_id)
         yield fw
 
@@ -221,7 +248,7 @@ class _NativeFileWriter:
             remain -= self._fd.write(dat)
 
 
-class NativeFileStorage:
+class NativeFileStorage(IFileStorage):
     def __init__(self, directory: Pathish):
         self._path = Path(directory).resolve()
 
@@ -278,15 +305,16 @@ if TYPE_CHECKING:
 
 
 @asynccontextmanager
-async def open_db_storage(*,
-                          db: Optional[db_mod.Database] = None,
-                          run_id: Optional[int] = None) -> AsyncIterator[IFileStorage]:
+async def _open_db_storage(*,
+                           db: Optional[db_mod.Database] = None,
+                           run_id: Optional[int] = None) -> AsyncIterator[IFileStorage]:
     if db is None or run_id is None:
         dbctx = db_mod.global_context_data()
         if not dbctx:
             raise RuntimeError('open_db_storage() requires a database argument or to be called within a task context')
         db = db or dbctx.database
         run_id = run_id if run_id is not None else dbctx.run_id
+    _migrate_db(db)
     async with db.transaction_context():
         yield _DatabaseFileStorage(db, run_id)
 
@@ -299,7 +327,7 @@ async def _ensure_storage(st: IFileStorage | None) -> AsyncIterator[IFileStorage
 
     dbctx = db_mod.global_context_data()
     if dbctx is None:
-        raise RuntimeError(f'Invalid attempt to use database storage outside of a task context')
+        raise RuntimeError('Invalid attempt to use database storage outside of a task context')
     db = dbctx.database
     async with db.transaction_context():
         yield _DatabaseFileStorage(db, dbctx.run_id)
@@ -338,8 +366,8 @@ async def store_file_as(fpath: Pathish,
                         into: IFileStorage | None = None,
                         if_exists: IfExists = 'fail') -> None:
     async with AsyncExitStack() as stack:
-        into = await stack.enter_async_context(_ensure_storage(into))
-        writer = await stack.enter_async_context(into.open_file_writer(dest, if_exists=if_exists))
+        f = await stack.enter_async_context(_ensure_storage(into))
+        writer = await stack.enter_async_context(f.open_file_writer(dest, if_exists=if_exists))
         if writer is None:
             assert if_exists == 'keep', if_exists
             return
@@ -360,12 +388,11 @@ async def recover(fpath: Pathish, *, from_: IFileStorage | None = None) -> bytes
 
 async def recover_iter(fpath: Pathish, *, from_: IFileStorage | None = None) -> AsyncIterator[bytes]:
     async with AsyncExitStack() as st:
-        from_ = await st.enter_async_context(_ensure_storage(from_))
-        bufs = await st.enter_async_context(from_.read_file(fpath))
+        f = await st.enter_async_context(_ensure_storage(from_))
+        bufs = await st.enter_async_context(f.read_file(fpath))
         async for b in bufs:
             yield b
 
 
 if TYPE_CHECKING:
-    f: IFileStorage = fs
-    util.unused(f)
+    util.typecheckv(IFileStorage)(fs)

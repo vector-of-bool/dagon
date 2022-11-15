@@ -15,7 +15,7 @@ class _ProcOutputItem(Protocol):
     kind: Literal['error', 'output']
 
 
-class ProcessResultUIInfo(NamedTuple):
+class PrintProcessResultUIInfo(NamedTuple):
     command: Sequence[str]
     retcode: int
     output: Sequence[_ProcOutputItem]
@@ -39,7 +39,7 @@ def _print_boxed_output(output: Iterable[_ProcOutputItem], width: int) -> Iterab
             yield Message(l, MessageType.Print)
 
 
-def _box_lines(result: ProcessResultUIInfo, max_width: int) -> Iterable[Message]:
+def _box_lines(result: PrintProcessResultUIInfo, max_width: int) -> Iterable[Message]:
     cmd_plain = ' '.join(shlex.quote(s) for s in result.command)
     max_cmd = len(cmd_plain) + 10
     max_line = max((len(l.out) for l in result.output), default=0) - 5
@@ -59,5 +59,5 @@ def _box_lines(result: ProcessResultUIInfo, max_width: int) -> Iterable[Message]
     yield Message(f'└{" End of output ":─<{inner_width+2}}┘', MessageType.MetaPrint)
 
 
-def make_proc_info_box(result: ProcessResultUIInfo, max_width: int | None = None) -> Iterable[Message]:
+def make_proc_info_box(result: PrintProcessResultUIInfo, max_width: int | None = None) -> Iterable[Message]:
     return _box_lines(result, max_width or 9999999)

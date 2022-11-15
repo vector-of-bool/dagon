@@ -12,7 +12,8 @@ import sqlite3
 import types
 from contextlib import ExitStack, contextmanager
 from typing import (TYPE_CHECKING, Any, AsyncContextManager, Awaitable, Callable, ContextManager, Generator, Generic,
-                    Iterable, Iterator, Type, TypeVar, cast, overload)
+                    Iterable, Iterator, Mapping, MutableMapping, MutableSequence, Sequence, Type, TypeVar, Union, cast,
+                    overload)
 
 from typing_extensions import Protocol
 
@@ -24,23 +25,11 @@ U = TypeVar('U')
 "A second generic invariant type variable"
 
 
-class UndefinedType:
-    """
-    The type of the generic :const:`Undefined` constant.
-    """
-    _inst: UndefinedType | None = None
-
-    def __new__(cls) -> UndefinedType:
-        if cls._inst is None:
-            cls._inst = super().__new__(cls)
-        return cls._inst
+class DefaultSentinelType():
+    pass
 
 
-Undefined = UndefinedType()
-"""
-An 'undefined' constant to be used to represent the absence of parameter/return
-values where `None` is within the domain of that parameter or return value.
-"""
+_DEFAULT_SENTINEL: Any = DefaultSentinelType()
 
 
 @overload
@@ -53,7 +42,7 @@ def first(items: Iterable[T], *, default: U) -> T | U:
     ...
 
 
-def first(items: Iterable[T], **kw: U) -> T | U:
+def first(items: Iterable[T], default: U = _DEFAULT_SENTINEL) -> T | U:
     """
     Obtain the first element of an iterable
 
@@ -65,14 +54,31 @@ def first(items: Iterable[T], **kw: U) -> T | U:
     """
     for n in items:
         return n
-    if 'default' not in kw:
-        raise ValueError(f'No first item in an empty iterable ({items!r})')
-    return kw['default']
+    if default is not _DEFAULT_SENTINEL:
+        return default
+    raise ValueError(f'No first item in an empty iterable ({items!r})')
+
+
+@overload
+def cell(table: Iterable[Iterable[T]]) -> T:
+    ...
+
+
+@overload
+def cell(table: Iterable[Iterable[T]], *, default: U) -> T | U:
+    ...
+
+
+def cell(table: Iterable[Iterable[T]], *, default: U = _DEFAULT_SENTINEL) -> T | U:
+    v = first(first(table, default=(default, )), default=default)
+    if v is _DEFAULT_SENTINEL:
+        raise ValueError(f'No first item in an empty iterable ({table!r})')
+    return v
 
 
 def unused(*args: Any) -> None:
     """Does nothing. Used to mark the given arguments as unused."""
-    args  # pylint: disable=pointless-statement
+    _ = args
 
 
 class NoneSuch(Generic[T]):
@@ -155,6 +161,28 @@ def scope_set_contextvar(cvar: contextvars.ContextVar[T], value: T) -> ContextMa
     return on_context_exit(lambda: cvar.reset(tok))
 
 
+def typecheck(iface: Type[T]) -> Callable[[Type[T]], Type[T]]:
+    """
+    Given a type, return a callable that accepts that type. This can be used
+    to insert type checks into modules. Should not be called at runtime: guard
+    this with a `typing.TYPE_CHECKING` condition.
+    """
+    unused(iface)
+    assert False, TypeError('typecheck() should never by called at runtime')
+    return lambda f: f  # Unreachable, but makes Pylint happy
+
+
+def typecheckv(iface: Type[T]) -> Callable[[T], T]:
+    """
+    Given a type, return a callable that accepts **a value** of that typte. This
+    can be used to insert type checks into modules. Should not be called at
+    runtime: guard this with a `typing.TYPE_CHECKING` condition.
+    """
+    unused(iface)
+    assert False, TypeError('typecheckv() should never by called at runtime')
+    return lambda f: f  # Unreachable, but makes Pylint happy
+
+
 class ReadyAwaitable(Generic[T]):
     """
     An `Awaitable` object that when awaited will immediately resolve to a given
@@ -178,23 +206,12 @@ class AsyncNullContext(Generic[T]):
     def __init__(self, value: T = None) -> None:
         self._value = value
 
-    def __aenter__(self) -> Awaitable[T]:
-        return ReadyAwaitable(self._value)
+    async def __aenter__(self) -> T:
+        return self._value
 
-    def __aexit__(self, _exc_t: Type[BaseException] | None, _exc: BaseException | None,
-                  _tb: types.TracebackType | None) -> Awaitable[None]:
-        return ReadyAwaitable(None)
-
-
-def typecheck(iface: Type[T]) -> Callable[[Type[T]], None]:
-    """
-    Given a type, return a callable that accepts that type. This can be used
-    to insert type checks into modules. Should not be called at runtime: guard
-    this with a `typing.TYPE_CHECKING` condition.
-    """
-    unused(iface)
-    assert False, TypeError('typecheck() should never by called at runtime')
-    return lambda f: None  # Unreachable, but makes Pylint happy
+    async def __aexit__(self, _exc_t: Type[BaseException] | None, _exc: BaseException | None,
+                        _tb: types.TracebackType | None) -> None:
+        return None
 
 
 if TYPE_CHECKING:
@@ -256,3 +273,27 @@ def recursive_transaction(db: sqlite3.Connection) -> Iterator[None]:
     else:
         assert db.in_transaction, 'transaction was ended prematurely'
         db.execute('COMMIT')
+
+
+JSONScalar = Union[int, float, bool, None, str]
+JSONArray = Sequence['JSONValue']
+JSONObject = Mapping[str, 'JSONValue']
+JSONValue = Union[JSONScalar, JSONArray, JSONObject]
+
+MutableJSONArray = MutableSequence['MutableJSONValue']
+MutableJSONObject = MutableMapping[str, 'MutableJSONValue']
+MutableJSONValue = Union[JSONScalar, JSONArray, JSONObject]
+
+
+class _LazyAttrLookup(Generic[T]):
+    def __init__(self, callback: Callable[[], T]) -> None:
+        self.__callback__ = callback
+
+    def __getattribute__(self, __name: str) -> Any:
+        cb = object.__getattribute__(self, '__callback__')
+        this = cb()
+        return getattr(this, __name)
+
+
+def create_lazy_lookup(cb: Callable[[], T]) -> T:
+    return cast(T, _LazyAttrLookup(cb))

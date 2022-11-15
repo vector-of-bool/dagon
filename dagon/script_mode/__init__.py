@@ -67,3 +67,4 @@ def run(argv: Sequence[str] | None = None, *, default_tasks: Sequence[str] | Non
             argv=argv,
             default_tasks=default_tasks,
         ))
+    assert False

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import textwrap
 import traceback
+from typing_extensions import Protocol
 import warnings
 from pathlib import Path
 from typing import Iterable, NoReturn, Optional, Sequence, cast
@@ -101,7 +102,7 @@ def run_with_args(dag: TaskDAG, exts: ExtLoader, args: ParsedArgs, default_tasks
             print(f'No such task "{e.key}".', file=sys.stderr)
         return 1
 
-    exe = ExtAwareExecutor(exts, ll_dag, catch_signals=True)
+    exe = ExtAwareExecutor(exts, ll_dag, catch_signals=True, fail_cancels=args.fail_cancels)
 
     results = exe.run_all_until_complete()
     failed = False
@@ -135,7 +136,7 @@ def get_extensions() -> ExtLoader:
     return ExtLoader.default()
 
 
-class MainArgParseResults(ParsedArgs):
+class MainArgParseResults(ParsedArgs, Protocol):
     file: Optional[str]
     module: Optional[str]
     dir: Optional[Path]
@@ -162,7 +163,6 @@ def _main(argv: Sequence[str], exts: ExtLoader) -> int:
         action='store_true',
     )
     args = cast(MainArgParseResults, parser.parse_args(argv))
-    exts.handle_options(cast(argparse.Namespace, args))
 
     if args.version:
         version = pkg_resources.get_distribution('dagon').version
@@ -207,6 +207,8 @@ def _main(argv: Sequence[str], exts: ExtLoader) -> int:
     finally:
         _g_loading_dag = False
         sys.path = prev_path
+
+    exts.handle_options(cast(argparse.Namespace, args))
     return run_with_args(dag, exts, args, default_tasks=[])
 
 
