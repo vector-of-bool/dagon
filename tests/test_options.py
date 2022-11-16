@@ -1,4 +1,4 @@
-from dagon.util import first, unused
+from dagon.util import first
 from tests.test_util import dag_test
 
 from dagon import task, option
