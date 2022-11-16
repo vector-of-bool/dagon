@@ -203,17 +203,10 @@ class _PersistExt(BaseExtension[None, None, None]):
             yield
 
 
-class _ImplicitPersistence(NamedTuple):
-    globl: IPersistentDataAccess = _ImplicitPersistenceItem(_GLOBAL_PERSIST)
-    local: IPersistentDataAccess = _ImplicitPersistenceItem(_TASK_LOCAL_PERSIST)
-
-
-_imp_persist = _ImplicitPersistence()
-
 unused(_PersistExt)
 
-globl = _imp_persist.globl
-local = _imp_persist.local
+globl: IPersistentDataAccess = util.create_lazy_lookup(_GLOBAL_PERSIST.get)
+local: IPersistentDataAccess = util.create_lazy_lookup(_TASK_LOCAL_PERSIST.get)
 
 
 def in_database(db_: db.Database, *, task: db.TaskID | None = None) -> IPersistentDataAccess:
