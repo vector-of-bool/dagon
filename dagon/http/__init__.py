@@ -77,7 +77,7 @@ async def _get_context() -> AsyncIterator[_GlobalContext]:
         yield glb
 
 
-class _Ext(BaseExtension[None, _GlobalContext | None, None]):
+class _Ext(BaseExtension[None, '_GlobalContext | None', None]):
     dagon_ext_name: str = 'dagon.http'
 
     def global_context(self, graph: OpaqueTaskGraphView) -> AsyncContextManager[_GlobalContext | None]:

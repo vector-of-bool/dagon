@@ -126,7 +126,7 @@ async def copy_file(file: Pathish,
     if not pardir.exists() and mkdirs:
         pardir.mkdir(exist_ok=True, parents=True)
 
-    stat = file.stat(follow_symlinks=False)
+    stat = file.stat()
     is_small = stat.st_size < 1024 * 64
     do_copy: Callable[[Path, Path], None]
     if preserve_symlinks and file.is_symlink():

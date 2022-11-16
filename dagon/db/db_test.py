@@ -11,12 +11,10 @@ def get_mem_db() -> mod.Database:
 
 
 # Mark tests as asyncio to ensure there is a thread loop for the database
-@pytest.mark.asyncio
 def test_create() -> None:
     mod.open_sqlite_db(':memory:')
 
 
-@pytest.mark.asyncio
 def test_new_run_id() -> None:
     db = get_mem_db()
     run_id = db.new_run_id()
@@ -25,7 +23,6 @@ def test_new_run_id() -> None:
     assert run_id_2 == 2
 
 
-@pytest.mark.asyncio
 def test_store_proc_exec() -> None:
     db = get_mem_db()
     run = db.new_run_id()

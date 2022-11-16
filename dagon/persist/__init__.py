@@ -2,6 +2,8 @@
 Module for creating/managing persistent data.
 """
 
+from __future__ import annotations
+
 import contextvars
 import json
 from contextlib import asynccontextmanager, contextmanager

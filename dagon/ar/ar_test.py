@@ -43,14 +43,8 @@ async def test_tar_create_expand() -> None:
 
 
 @pytest.mark.asyncio
-async def test_zip_create_expand() -> None:
-    # Check that the default extension is .zip when the format is Zip
-    zip_path = await ar.create_from_dir(PKG_ROOT, format='zip')
-    assert zip_path.suffix == '.zip'
-    await ar.fs.remove(zip_path)
-
-    tdir = Path(tempfile.mkdtemp())
-    zip_path = await ar.create_from_dir(PKG_ROOT, destination=tdir / 'test.zip', format='zip')
+async def test_zip_create_expand(tmp_path: Path) -> None:
+    zip_path = await ar.create_from_dir(PKG_ROOT, destination=tmp_path / 'test.zip', format='zip')
 
     assert zip_path.exists()
 

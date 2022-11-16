@@ -24,7 +24,7 @@ class CacheAccess:
 
     def for_url(self, url: str) -> Iterable[CacheEntry]:
         q = cast(
-            Iterable[tuple[int, str, str | None, str | None, str | None, int | None, int]],
+            'Iterable[tuple[int, str, str | None, str | None, str | None, int | None, int]]',
             self._db(
                 r'''
             SELECT resource_id,
