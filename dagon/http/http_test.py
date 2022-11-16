@@ -11,8 +11,11 @@ from tests.test_util import dag_test
 
 JSON_PLACEHOLDER = 'https://jsonplaceholder.typicode.com'
 
+requires_http = pytest.mark.skipif(not http.is_supported(), reason='Requires [http] extra')
+
 
 @pytest.mark.asyncio
+@requires_http
 async def test_chunked_get() -> None:
     buf_iter = http.get_chunked(f'{JSON_PLACEHOLDER}/posts')
     buf_acc = b''
@@ -24,6 +27,7 @@ async def test_chunked_get() -> None:
 
 
 @pytest.mark.asyncio
+@requires_http
 async def test_download() -> None:
     local_file = Path(__file__).parent / 'test-download.json'
     try:
@@ -36,6 +40,7 @@ async def test_download() -> None:
 
 
 @pytest.mark.asyncio
+@requires_http
 async def test_download_tmp() -> None:
     async with http.download_tmp(f'{JSON_PLACEHOLDER}/posts/1') as tmpfile:
         json_str = tmpfile.read_text()
@@ -45,6 +50,7 @@ async def test_download_tmp() -> None:
 
 
 @dag_test()
+@requires_http
 def test_cached_downloads():
     url = 'https://github.com/Kitware/CMake/releases/download/v3.25.0-rc4/cmake-3.25.0-rc4-linux-x86_64.tar.gz'
 
