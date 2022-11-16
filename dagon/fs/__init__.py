@@ -16,9 +16,8 @@ import stat
 from concurrent.futures import ThreadPoolExecutor
 from io import BufferedIOBase
 from pathlib import Path, PurePath
-from types import TracebackType
-from typing import (AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Mapping, Type,
-                    TypeVar, Union, overload)
+from typing import (AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Mapping, TypeVar,
+                    Union, overload)
 
 from typing_extensions import Literal
 
@@ -289,10 +288,6 @@ def _create_fs_tree(root: Pathish, items: Mapping[str, TreeItem], cancel: Cancel
             _create_fs_tree(root / filename, item, cancel)
 
 
-def _unlink_file(fpath: Path) -> None:
-    fpath.unlink()
-
-
 _delete_increment = 0
 
 
@@ -308,33 +303,35 @@ def _remove1(f: Path, recurse: bool, absent_ok: bool, cancel: CancellationToken 
             raise
         # We're okay if this file is missing
         return util.ReadyAwaitable(None)
-    try:
-        _unlink_file(tmpname)
-    except IsADirectoryError:
+    if tmpname.is_dir():
         if not recurse:
-            # This is a directory, and we are not set to recursively delete things
-            raise
+            raise IsADirectoryError(f)
         return _run_fs_op(lambda: _remove_dir(tmpname, cancel))
+    _remove_file_or_dir(tmpname)
     return util.ReadyAwaitable(None)
+
+
+def _remove_file_or_dir(f: Path) -> None:
+    try:
+        f.unlink()
+    except PermissionError:
+        _make_writable_retry(os.remove, str(f))
 
 
 def _remove_dir(dirpath: Path, cancel: CancellationToken | None) -> None:
     raise_if_cancelled(cancel)
-    shutil.rmtree(dirpath, onerror=_rmtree_on_error)
+    shutil.rmtree(dirpath, onerror=_make_writable_retry)
 
 
-def _rmtree_on_error(
+def _make_writable_retry(
     fn: Callable[[str], None],
     path: str,
-    _exc: tuple[Type[BaseException], BaseException, TracebackType],
+    *_ignore: None,
 ) -> None:
-    try:
+    if fn is os.chmod:
         raise
-    except PermissionError as e:
-        if e.errno != 5:
-            raise
-        os.chmod(path, stat.S_IWRITE)
-        fn(path)
+    os.chmod(path, stat.S_IWRITE)
+    fn(path)
 
 
 def remove(files: NPaths,
@@ -471,7 +468,7 @@ def safe_move_file(source: Pathish,
             c: Literal['replace'] = if_exists
             util.unused(c)
             # User wants us to replace the file in the destination
-            _unlink_file(dest)
+            _remove_file_or_dir(dest)
             return safe_move_file(source, dest, mkdirs=mkdirs, if_exists=if_exists, cancel=cancel)
         if e.errno == errno.EXDEV:
             # Cross-device linking: We're trying to relink a file across a filesystem
@@ -482,7 +479,7 @@ def safe_move_file(source: Pathish,
 
 async def _teleport_file(source: Path, dest: Path, cancel: CancellationToken | None) -> Path:
     await copy_file(file=source, dest=dest, cancel=cancel, preserve_stat=True, preserve_symlinks=True)
-    _unlink_file(source)
+    _remove_file_or_dir(source)
     return dest
 
 
