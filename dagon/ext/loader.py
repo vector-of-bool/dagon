@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import contextvars
 import sys
+import traceback
 import warnings
 from contextlib import (AsyncExitStack, ExitStack, asynccontextmanager, contextmanager)
 from typing import (Any, AsyncContextManager, AsyncIterator, Callable, Iterable, Iterator, NamedTuple, Sequence, cast,
@@ -255,7 +256,7 @@ class ExtLoader:
         try:
             cls: _OpaqueExt | object = ep.load()
         except BaseException as e:
-            warnings.warn(f"An exception occurred while trying to load extension {ep!r}: {e}",
+            warnings.warn(f"An exception occurred while trying to load extension {ep!r}: {traceback.format_exc()}",
                           ExtensionLoadWarning,
                           source=e)
             return
@@ -283,9 +284,10 @@ class ExtLoader:
         try:
             inst: Any = cls()
         except BaseException as e:
-            warnings.warn(f'Instantiating/calling extension loader [{cls!r}] resulted in an exception: {e}',
-                          ExtensionLoadWarning,
-                          source=e)
+            warnings.warn(
+                f'Instantiating/calling extension loader [{cls!r}] resulted in an exception: {traceback.format_exc()}',
+                ExtensionLoadWarning,
+                source=e)
             return
         # Check that the extension implements the interface using a type-checkable Protocol:
         if not isinstance(inst, IExtension):
