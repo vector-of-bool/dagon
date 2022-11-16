@@ -70,6 +70,6 @@ def test_cached_downloads():
         async with http.download_tmp(url):
             pass
         new_dur = datetime.now() - start
-        assert new_dur < dur
+        assert new_dur < dur + timedelta(seconds=2)
 
     return [download_again]

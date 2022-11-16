@@ -17,7 +17,6 @@ Factory = Callable[[], T]
 def dag_test(argv: Sequence[str] = ()) -> Callable[[Factory[Iterable[dagon.task.Task[Any]]]], NullaryFn]:
     def decorate(test_fn: Factory[Iterable[dagon.task.Task[Any]]]) -> NullaryFn:
         @functools.wraps(test_fn)
-        @pytest.mark.asyncio
         def test_with_dag():
             dag = TaskDAG('<test>')
             exts = main.get_extensions()
