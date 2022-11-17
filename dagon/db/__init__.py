@@ -112,7 +112,7 @@ def apply_migrations(db: sqlite3.Connection, meta_table: str, migrations: Sequen
     if version == n_migrations:
         # All migrations are up-to-date
         return
-    savepoint = random.randbytes(6).hex()
+    savepoint = f'save-{random.randint(0, 99999)}'
     db.execute(f"savepoint '{savepoint}'")
     try:
         _apply_migrations(db, version, migrations)

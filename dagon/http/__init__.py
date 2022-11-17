@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from datetime import datetime
-from io import BufferedReader
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
-from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, AsyncIterator, BinaryIO, Mapping, NamedTuple,
-                    Sequence, Union)
+from datetime import datetime
+from io import BufferedReader
+from pathlib import Path, PurePosixPath
+from typing import (IO, TYPE_CHECKING, AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, BinaryIO, Callable,
+                    Mapping, NamedTuple, Sequence, Union, overload)
 
 import pkg_resources
+from typing_extensions import Literal, TypeAlias
+
 from dagon import util
 
-from ..util import AsyncNullContext
-from .. import fs
+from .. import fs, task, ui
 from ..event import Handler
 from ..event.cancel import CancellationToken, raise_if_cancelled
 from ..ext.base import BaseExtension
 from ..ext.iface import OpaqueTaskGraphView
+from ..util import AsyncNullContext
 from . import _cache
 
 try:
@@ -77,7 +79,7 @@ async def _get_context() -> AsyncIterator[_GlobalContext]:
         yield glb
 
 
-class _Ext(BaseExtension[None, _GlobalContext | None, None]):
+class _Ext(BaseExtension[None, '_GlobalContext | None', None]):
     dagon_ext_name: str = 'dagon.http'
 
     def global_context(self, graph: OpaqueTaskGraphView) -> AsyncContextManager[_GlobalContext | None]:
@@ -356,3 +358,98 @@ async def download(url: str,
         dest.parent.mkdir(parents=True, exist_ok=True)
         await fs.safe_move_file(tmp_path, dest, mkdirs=True, cancel=cancel)
     return dest
+
+
+_StrOrStrFactory: TypeAlias = 'str | Callable[[], str | Awaitable[str]]'
+
+
+@overload
+def download_task(name: str,
+                  url: _StrOrStrFactory,
+                  *,
+                  doc: str = ...,
+                  default: bool = ...,
+                  message: str = ...,
+                  depends: task.DependsArg = ...,
+                  order_only_depends: task.DependsArg = ...,
+                  filename: str = ...) -> task.Task[Path]:
+    ...
+
+
+@overload
+def download_task(name: str,
+                  url: _StrOrStrFactory,
+                  *,
+                  doc: str = ...,
+                  default: bool = ...,
+                  message: str = ...,
+                  depends: task.DependsArg = ...,
+                  order_only_depends: task.DependsArg = ...,
+                  destination: fs.Pathish,
+                  if_exists: Literal['keep', 'replace', 'fail'] = 'keep') -> task.Task[Path]:
+    ...
+
+
+def download_task(name: str,
+                  url: _StrOrStrFactory,
+                  *,
+                  doc: str | None = None,
+                  default: bool = False,
+                  message: str | None = None,
+                  depends: task.DependsArg = (),
+                  order_only_depends: task.DependsArg = (),
+                  destination: fs.Pathish | None = None,
+                  filename: str | None = None,
+                  if_exists: Literal['keep', 'replace', 'fail'] = 'keep') -> task.Task[Path]:
+    """
+    Define a task that downloads a resource from the given URL. The result of
+    the task is the path to a local copy of the downloaded resource.
+
+    :param name: The name of the task to generate.
+    :param url: A URL string, or a factory function that returns a URL string.
+        The resource at this URL will be downloaded.
+    :param message: A status message to display while downloading the file.
+    :param destination: The path to where the downloaded file will be written.
+        If omitted, the file will be downloaded to a temporary location and
+        removed after the graph execution completes.
+    :param filename: Set the filename of the downloaded file. By default, generates
+        a filename based on the URL string.
+    :param if_exists: If ``destination`` was provided and the destination names
+        an existing path, what should be done? Default is ``"keep"`` which will
+        leave the destination unmodified and not download any data.
+    """
+    url_ = url
+    dest_ = destination
+
+    @task.define(
+        name=name,
+        default=default,
+        depends=depends,
+        order_only_depends=order_only_depends,
+        doc=doc,
+    )
+    async def fn() -> Path:
+        url = url_
+        destination = dest_
+        if not isinstance(url, str):
+            url = url()
+            if not isinstance(url, str):
+                url = await url
+        _: str = url
+        if destination is None:
+            tdir = tempfile.mkdtemp()
+            destination = Path(tdir) / (filename or PurePosixPath(url).name or 'download')
+        destination = Path(destination)
+        if destination.is_file():
+            if if_exists == 'keep':
+                return destination
+            if if_exists == 'fail':
+                raise FileExistsError(destination)
+            _replace: Literal['replace'] = if_exists
+            await fs.remove(destination)
+        ui.status(message or f'Downloading [{url}]')
+        await download(url, destination=destination, on_progress=lambda pr: ui.progress(pr.progress))
+        ui.progress(None)
+        return destination
+
+    return fn

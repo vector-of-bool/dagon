@@ -51,8 +51,9 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from inspect import isclass
 from pathlib import Path
-from typing import (TYPE_CHECKING, Any, Callable, ContextManager, Generic, Iterable, Mapping, Protocol, Sequence, Type,
-                    TypeVar, Union, cast, overload)
+from typing import (TYPE_CHECKING, Any, Callable, ContextManager, Generic, Iterable, Mapping, Sequence, Type, TypeVar,
+                    Union, cast, overload)
+from typing_extensions import Protocol
 
 import dagon.tool.args
 

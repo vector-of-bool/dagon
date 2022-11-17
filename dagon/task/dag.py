@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import inspect
 import itertools
 import os
 import signal
+import traceback
+import warnings
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from types import FrameType
 from typing import (TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping, NamedTuple,
                     Sequence, TypeVar, cast, overload)
+
+from typing_extensions import Literal, TypeAlias
 
 from dagon.core.result import Failure
 
@@ -118,16 +123,81 @@ class TaskDAG:
         return await ex.run_all()
 
 
+_CleanupFunc: TypeAlias = 'Callable[[], None|Awaitable[None]]'
+
+
 class _ExecCtx(NamedTuple):
     exe: TaskExecutor[Any]
     task: Task[Any]
+    add_graph_cleanup: Callable[[_CleanupFunc], None]
+    add_cleanup_task: Callable[[asyncio.Task[Any]], None]
+    cleanups: list[_CleanupFunc]
 
 
-_CTX_EXEC = contextvars.ContextVar[_ExecCtx]('_CTX_EXECUTING_GRAPH')
+_TASK_CONTEXT = contextvars.ContextVar[_ExecCtx]('_TASK_CONTEXT')
 
 
 def current_task() -> Task[Any]:
-    return _CTX_EXEC.get().task
+    return _TASK_CONTEXT.get().task
+
+
+def cleanup(func: _CleanupFunc, *, when: Literal['now', 'graph-exit', 'task-exit'] = 'graph-exit') -> None:
+    """
+    Define a cleanup routine for the task or graph.
+
+    :param func: A cleanup function to execute. If invoking this function
+        returns an `~Awaitable` object, that object will be awaited before the
+        task graph exits.
+    :param when:
+        Specify when the cleanup routine should begin executing. One of:
+
+        - ``"graph-exit"`` - (Default) launch the cleanup routine only after no
+          more tasks are running and the graph execution is shutting down.
+        - ``"task-exit"`` - Launch the cleanup routine after the current task
+          is finished executing.
+        - ``"now"`` - Launch the cleanup routine immediately.
+
+    Regardless of when a cleanup routine is launched, it will not block any
+    process in graph execution except for graph shutdown, when all cleanup
+    routines will be awaited.
+
+    Use cleanup routines to execute actions that should be taken, but do not
+    necessarily need to block the remainder of task execution. For example, the
+    removal of temporary files should always occur, but it is not necessary that
+    subsequent tasks need to wait for this to be complete.
+
+    .. note::
+
+        The cleanup function executes without a task context, so task-contextual
+        actions must not be used!
+
+    .. note::
+
+        Exceptions that occur during the cleanup execution are ignored but do
+        generate a `~RuntimeWarning`.
+
+    .. note::
+
+        Cleanup routines are executed asynchronously, but block graph execution
+        shutdown. If a cleanup function takes too long to execute (Many
+        seconds), it may be cancelled.
+    """
+    tctx = _TASK_CONTEXT.get()
+    if when == 'task-exit':
+        tctx.cleanups.append(func)
+    elif when == 'graph-exit':
+        tctx.add_graph_cleanup(func)
+    elif when == 'now':
+        t = asyncio.create_task(_run_cleanup(func), name=f'Cleanup {func!r} from task "{tctx.task.name}"')
+        tctx.add_cleanup_task(t)
+    else:
+        _: int = when
+
+
+async def _run_cleanup(cleaner: _CleanupFunc) -> None:
+    r = cleaner()
+    if inspect.isawaitable(r):
+        await r
 
 
 @overload
@@ -147,7 +217,7 @@ def result_of(task: Task[Any] | str) -> Awaitable[Any]:
     The other task must be a direct dependency of the currently executing task,
     and must not be an order-only dependency.
     """
-    ctx = _CTX_EXEC.get()
+    ctx = _TASK_CONTEXT.get()
     ctx_task = ctx.task
     if isinstance(task, str):
         find = (n for n in ctx.exe.graph.all_nodes if n.name == task)
@@ -173,6 +243,14 @@ async def _await_result(ares: Awaitable[NodeResult[Any]], name: str) -> Any:
     raise RuntimeError(f'Attempted to obtain result of task "{name}", which is failed/cancelled')
 
 
+class _GraphContext(NamedTuple):
+    cleanups: list[_CleanupFunc]
+    cleanup_tasks: list[asyncio.Task[Any]]
+
+
+_GRAPH_CONTEXT = contextvars.ContextVar[_GraphContext]('_GRAPH_CONTEXT')
+
+
 class TaskExecutor(exec.SimpleExecutor[Task[T]]):
     """
     A DAG executor that executes task objects and allows the results of tasks
@@ -193,8 +271,10 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
     @asynccontextmanager
     async def running_context(self) -> AsyncIterator[None]:
         from dagon.event.cancel import CancellationToken
+        ctx = _GraphContext([], [])
         async with AsyncExitStack() as st:
             await st.enter_async_context(super().running_context())
+            st.enter_context(scope_set_contextvar(_GRAPH_CONTEXT, ctx))
             tok = CancellationToken.get_context_local()
             if tok is None:
                 tok = CancellationToken()
@@ -209,6 +289,42 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
                     handle_signals.append(signal.SIGQUIT)
             st.enter_context(self._handle_signals(handle_signals, tok))
             yield
+
+        cleanup_tasks = set(ctx.cleanup_tasks)
+        # Start all graph-exit cleanups
+        for clean in ctx.cleanups:
+            cleanup_tasks.add(asyncio.create_task(_run_cleanup(clean)))
+        # Collect cleanup results
+        await self._cleanup(cleanup_tasks)
+
+    async def _cleanup(self, cleanups: set[asyncio.Task[Any]]) -> None:
+        # Newly added
+        all_tasks: set[asyncio.Task[Any]] = set()
+        if cleanups:
+            all_tasks |= cleanups
+            _done, pending = await asyncio.wait(cleanups, timeout=3, return_when=asyncio.ALL_COMPLETED)
+            if pending:
+                print('Cleanup tasks are executing...')
+                _done, pending = await asyncio.wait(pending, timeout=12, return_when=asyncio.ALL_COMPLETED)
+
+        for t in all_tasks:
+            self._print_cleanup_info(t)
+
+    @staticmethod
+    def _print_cleanup_info(task: asyncio.Task[Any]) -> None:
+        if task.done():
+            try:
+                task.result()
+            except:
+                tb = traceback.format_exc()
+                warnings.warn(f'Cleanup task {task!r} exited with an exception:\n{tb}', RuntimeWarning)
+            return
+        stack = task.get_stack()
+        if not stack:
+            tb = '<no traceback could be generated>'
+        else:
+            tb = traceback.format_stack(stack[-1])
+        warnings.warn(f'Cleanup {task!r} did not complete in a reasonable time: {tb}', RuntimeWarning)
 
     @contextmanager
     def _handle_signals(self, sigs: Sequence[int], cancel: CancellationToken) -> Iterator[None]:
@@ -232,13 +348,20 @@ class TaskExecutor(exec.SimpleExecutor[Task[T]]):
         the task within the scope that allows for result sharing.
         """
         from ..event import CancellationToken
-        with scope_set_contextvar(_CTX_EXEC, _ExecCtx(self, node)):
+        ctx = _ExecCtx(self,
+                       task=node,
+                       add_graph_cleanup=_GRAPH_CONTEXT.get().cleanups.append,
+                       add_cleanup_task=_GRAPH_CONTEXT.get().cleanup_tasks.append,
+                       cleanups=[])
+        with scope_set_contextvar(_TASK_CONTEXT, ctx):
             result = await self.do_run_task(node)
             if isinstance(result.result, Failure) and self.__fail_cancels:
                 cancel = CancellationToken.get_context_local()
                 if cancel:
                     cancel.cancel()
-            return result
+            for clean in ctx.cleanups:
+                ctx.add_cleanup_task(asyncio.create_task(_run_cleanup(clean)))
+        return result
 
     async def do_run_task(self, node: Task[T]) -> NodeResult[Task[T]]:
         return await super().do_run_node(node)

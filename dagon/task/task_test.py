@@ -107,11 +107,11 @@ async def test_order_only() -> None:
 
 
 def run_test_on_fun(fn: Callable[[], Coroutine[None, None, None]], **kw: Any) -> None:
+    exts = main.get_extensions()
+    dag = TaskDAG('Test')
     with ExitStack() as st:
-        exts = main.get_extensions()
         st.enter_context(exts.app_context())
         t = mod.create_task_from_function(fn, **kw)
-        dag = TaskDAG('Test')
         dag.add_task(t)
         graph = dag.low_level_graph([t.name])
         results = ExtAwareExecutor(exts, graph, catch_signals=False, fail_cancels=True).run_all_until_complete()

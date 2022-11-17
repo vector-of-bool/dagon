@@ -12,10 +12,11 @@ from typing import Any, Awaitable, Callable, Iterable, Type, cast, overload
 
 from dagon.util import T, dot_kebab_name
 
-from .dag import TaskDAG, current_dag, result_of
+from .dag import TaskDAG, current_dag, result_of, cleanup
 from .task import Dependency, Task, TaskFunction
 
 __all__ = [
+    'cleanup',
     'define',
     'define_in',
     'fn_task',

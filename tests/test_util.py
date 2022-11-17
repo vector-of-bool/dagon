@@ -11,20 +11,19 @@ from dagon.tool import main
 from dagon.util import T
 
 NullaryFn = Callable[[], None]
-Factory = Callable[[], T]
+Factory = Callable[..., T]
 
 
 def dag_test(argv: Sequence[str] = ()) -> Callable[[Factory[Iterable[dagon.task.Task[Any]]]], NullaryFn]:
     def decorate(test_fn: Factory[Iterable[dagon.task.Task[Any]]]) -> NullaryFn:
         @functools.wraps(test_fn)
-        @pytest.mark.asyncio
-        def test_with_dag():
+        def test_with_dag(**kwargs: Any):
             dag = TaskDAG('<test>')
             exts = main.get_extensions()
             with ExitStack() as st:
                 st.enter_context(exts.app_context())
                 st.enter_context(populate_dag_context(dag))
-                runs = test_fn()
+                runs = test_fn(**kwargs)
                 nonlocal argv
                 argv = ['--db-path=:memory:'] + list(argv)
                 rc = main.run_for_dag(dag, exts, argv=argv, default_tasks=[t.name for t in runs])
