@@ -439,6 +439,7 @@ def download_task(name: str,
         if destination is None:
             tdir = tempfile.mkdtemp()
             destination = Path(tdir) / (filename or PurePosixPath(url).name or 'download')
+            task.cleanup(lambda: fs.remove(tdir, recurse=True, absent_ok=True), when='graph-exit')
         destination = Path(destination)
         if destination.is_file():
             if if_exists == 'keep':

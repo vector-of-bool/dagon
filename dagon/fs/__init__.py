@@ -17,13 +17,14 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BufferedIOBase
 from pathlib import Path, PurePath
 from typing import (AsyncContextManager, AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Mapping, TypeVar,
-                    Union, overload)
+                    Union, cast, overload)
 
 from typing_extensions import Literal
 
 from .. import util
 from ..event import CancellationToken, raise_if_cancelled
 from ..util import T
+from ..task import cleanup as _task_cleanup, define as _define_task, Task
 
 Pathish = Union['os.PathLike[str]', str]
 'A path-able argument. A string, subclass of `~pathlib.PurePath`, or anything with an ``__fspath__`` member'
@@ -291,7 +292,8 @@ def _create_fs_tree(root: Pathish, items: Mapping[str, TreeItem], cancel: Cancel
 _delete_increment = 0
 
 
-def _remove1(f: Path, recurse: bool, absent_ok: bool, cancel: CancellationToken | None) -> Awaitable[None]:
+def _remove1(f: Path, recurse: bool, absent_ok: bool, cancel: CancellationToken | None,
+             await_unlink: bool) -> Awaitable[None]:
     raise_if_cancelled(cancel)
     global _delete_increment
     _delete_increment += 1
@@ -303,22 +305,52 @@ def _remove1(f: Path, recurse: bool, absent_ok: bool, cancel: CancellationToken 
             raise
         # We're okay if this file is missing
         return util.ReadyAwaitable(None)
-    if tmpname.is_dir():
-        if not recurse:
-            raise IsADirectoryError(f)
-        return _run_fs_op(lambda: _remove_dir(tmpname, cancel))
-    _remove_file_or_dir(tmpname)
-    return util.ReadyAwaitable(None)
+    if not tmpname.is_dir():
+        # We don't need to do anything special for removing a non-directory file
+        # Unlinking a single file is fast enough that the overhead of scheduling
+        # outweighs actually removing anything
+        _remove_norecurse(tmpname)
+        return util.ReadyAwaitable(None)
+    # We're removing a directory
+    if not recurse:
+        # User does not want to recursively remove directories
+        raise IsADirectoryError(f)
+    do_remove = lambda: _run_fs_op(lambda: _remove_dir_recurse(tmpname, cancel))
+    if await_unlink:
+        # User wants the removal to wait on the unlink to complete
+        return do_remove()
+    try:
+        # Try to start an immediate cleanup operation that will remove the directory
+        _task_cleanup(do_remove, when='now')
+    except LookupError:
+        # There is no task context, so we must do it now
+        return do_remove()
+    else:
+        return util.ReadyAwaitable(None)
 
 
-def _remove_file_or_dir(f: Path) -> None:
+def _remove_norecurse(f: Path) -> None:
+    """
+    Synchronously remove the given file from the filesystem.
+
+    This is different from a regular os.unlink() in that it handles read-only
+    files on Windows, which will raise a PermissionError. These files will have
+    their read-only attribute removed and then unlinked.
+    """
     try:
         f.unlink()
     except PermissionError:
         _make_writable_retry(os.remove, str(f))
 
 
-def _remove_dir(dirpath: Path, cancel: CancellationToken | None) -> None:
+def _remove_dir_recurse(dirpath: Path, cancel: CancellationToken | None) -> None:
+    """
+    Synchronously remove a directory and all of its children.
+
+    This is a wrapper aronud `~shutil.rmtree` that will handle read-only files
+    on Windows, which need to have the read-only attribute removed before
+    deletion.
+    """
     raise_if_cancelled(cancel)
     shutil.rmtree(dirpath, onerror=_make_writable_retry)
 
@@ -328,6 +360,7 @@ def _make_writable_retry(
     path: str,
     *_ignore: None,
 ) -> None:
+    "Mark the given file as writable and invoke `fn` on the file"
     if fn is os.chmod:
         raise
     os.chmod(path, stat.S_IWRITE)
@@ -338,6 +371,7 @@ def remove(files: NPaths,
            *,
            recurse: bool = False,
            absent_ok: bool = False,
+           await_unlink: bool = False,
            cancel: CancellationToken | None = None) -> Awaitable[None]:
     """
     Remove one or more files or directories.
@@ -348,6 +382,12 @@ def remove(files: NPaths,
     :param absent_ok: If ``True`` and any named file does not exist, no error
         will be raised. This can create simple idempotent file/directory
         removal.
+    :param await_unlink: If invoked within a task context and `await_unlink`
+        is `False`, the unlink operation of directory contents will be deferred
+        into a cleanup operation that will not block the caller, even if the
+        return value is ``await``\\ ed. If it is required that the storage
+        allocated to the files be reclaimed before continuing, set this
+        parameter to `True`.
     :param cancel: A cancellation token for the operation.
 
     .. hint::
@@ -357,19 +397,23 @@ def remove(files: NPaths,
         return value is ``await``\\ ed), all named files/directories will be
         gone from their original location.
 
+        If called within a task context, the unlink operation may be deferred to
+        a cleanup operation that completes in the background without blocking
+        the caller (even if the return value is ``await``\\ ed). To suppress
+        this optimization, set `await_unlink` to `True`.
+
         Before being deleted from disk, the named files/directories are moved to
         a new temporary name. This move operation is extremely fast, whereas a
         recursive directory deletion might be extremely slow. For this reason,
         you can call :func:`remove` without awaiting, then act "as if" the files
         are already deleted (they are moved to a temporary location and being
-        deleted in the background). Await the result of :func:`remove` to block
-        until the deletion operations are actually completed.
+        deleted in the background).
     """
     cancel = cancel or CancellationToken.get_context_local()
     if isinstance(files, (str, PurePath)):
-        return _remove1(Path(files), recurse, absent_ok, cancel)
+        return _remove1(Path(files), recurse, absent_ok, cancel, await_unlink)
     multi_files = iter_pathish(files)
-    multi_rm = map(lambda f: _remove1(f, recurse, absent_ok, cancel), multi_files)
+    multi_rm = map(lambda f: _remove1(f, recurse, absent_ok, cancel, await_unlink), multi_files)
     futs = set(map(asyncio.ensure_future, multi_rm))
     return _remove_gather(futs)
 
@@ -468,7 +512,7 @@ def safe_move_file(source: Pathish,
             c: Literal['replace'] = if_exists
             util.unused(c)
             # User wants us to replace the file in the destination
-            _remove_file_or_dir(dest)
+            _remove_norecurse(dest)
             return safe_move_file(source, dest, mkdirs=mkdirs, if_exists=if_exists, cancel=cancel)
         if e.errno == errno.EXDEV:
             # Cross-device linking: We're trying to relink a file across a filesystem
@@ -479,7 +523,7 @@ def safe_move_file(source: Pathish,
 
 async def _teleport_file(source: Path, dest: Path, cancel: CancellationToken | None) -> Path:
     await copy_file(file=source, dest=dest, cancel=cancel, preserve_stat=True, preserve_symlinks=True)
-    _remove_file_or_dir(source)
+    await remove(source, recurse=True, cancel=cancel)
     return dest
 
 
@@ -497,3 +541,44 @@ def read_file(fpath: Pathish) -> AsyncContextManager[AsyncIterable[bytes]]:
     """
     from ..storage import NativeFileStorage
     return NativeFileStorage('/').read_file(fpath)
+
+
+_PathsArg = Union[Pathish,  #
+                  Awaitable['_PathsArg'],  #
+                  util.RecursivelyIterable['_PathsArg'],  #
+                  Callable[[], '_PathsArg'],  #
+                  Callable[[], Awaitable['_PathsArg']]]
+
+
+def removal_task(name: str, paths: _PathsArg, *, absent_ok: bool = True, recurse: bool = True) -> Task[None]:
+    @_define_task(name=name)
+    async def _task():
+        removals: set[Awaitable[None]] = set()
+        async for p in _iter_paths(paths):
+            removals.add(remove(p, recurse=recurse, absent_ok=absent_ok))
+        if removals:
+            await asyncio.wait(removals)
+
+    return _task
+
+
+async def _iter_paths(paths: _PathsArg, *, fac: Callable[[Pathish], _PathT] = Path) -> AsyncIterator[_PathT]:
+    if isinstance(paths, Awaitable):
+        paths = await paths
+    if isinstance(paths, (str, PurePath)):
+        yield fac(paths)
+        return
+    if hasattr(paths, '__fspath__'):
+        yield fac(paths)  # type: ignore
+        return
+    if callable(paths):
+        ret = paths()
+        if isinstance(ret, Awaitable):
+            ret = await ret
+        async for sub in _iter_paths(ret, fac=fac):
+            yield sub
+        return
+    paths = cast(util.RecursivelyIterable[_PathsArg], paths)
+    for p in paths:
+        async for sub in _iter_paths(p, fac=fac):
+            yield sub

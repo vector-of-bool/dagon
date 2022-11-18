@@ -135,6 +135,7 @@ class _ExecCtx(NamedTuple):
 
 
 _TASK_CONTEXT = contextvars.ContextVar[_ExecCtx]('_TASK_CONTEXT')
+_CLEANUP_RUNNING = contextvars.ContextVar[bool]('_CLEANUP_RUNNING', default=False)
 
 
 def current_task() -> Task[Any]:
@@ -182,6 +183,9 @@ def cleanup(func: _CleanupFunc, *, when: Literal['now', 'graph-exit', 'task-exit
         shutdown. If a cleanup function takes too long to execute (Many
         seconds), it may be cancelled.
     """
+    if _CLEANUP_RUNNING.get():
+        # XXX: Support reentrant cleanup?
+        raise LookupError(_TASK_CONTEXT.name)
     tctx = _TASK_CONTEXT.get()
     if when == 'task-exit':
         tctx.cleanups.append(func)
@@ -195,9 +199,10 @@ def cleanup(func: _CleanupFunc, *, when: Literal['now', 'graph-exit', 'task-exit
 
 
 async def _run_cleanup(cleaner: _CleanupFunc) -> None:
-    r = cleaner()
-    if inspect.isawaitable(r):
-        await r
+    with scope_set_contextvar(_CLEANUP_RUNNING, True):
+        r = contextvars.Context().run(cleaner)
+        if inspect.isawaitable(r):
+            await r
 
 
 @overload

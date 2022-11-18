@@ -70,7 +70,7 @@ async def test_remove_file_fast(tmp_path: Path) -> None:
     foo_txt = tmp_path / 'foo.txt'
     foo_txt.write_text('hello')
     assert foo_txt.exists()
-    # File is already deleted, even if we don't await it yet:
+    # File is already gone, even if we don't await it yet:
     f = fs.remove(foo_txt)
     assert not foo_txt.exists()
     await f
