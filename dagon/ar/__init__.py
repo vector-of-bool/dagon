@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import (IO, Awaitable, Callable, Iterable, NamedTuple, Union, cast)
 
-from typing_extensions import Literal
+from typing_extensions import Literal, TypeGuard
 
 from .. import fs
 from ..event import CancellationToken, raise_if_cancelled, Handler
@@ -371,6 +371,14 @@ def _is_file(m: MemInfo) -> bool:
         return m.isfile()
     return not m.is_dir()
 
+def _is_symlink(m: MemInfo) -> TypeGuard[tarfile.TarInfo]:
+    if isinstance(m, tarfile.TarInfo):
+        return m.issym()
+    # XXX: External attributes may indicate a symlink?
+    return False
+
+def _is_hardlink(m: MemInfo) -> TypeGuard[tarfile.TarInfo]:
+    return isinstance(m, tarfile.TarInfo) and m.islnk()
 
 def _open(ar: zipfile.ZipFile | tarfile.TarFile, m: MemInfo) -> IO[bytes]:
     if isinstance(ar, tarfile.TarFile):
@@ -446,9 +454,18 @@ async def _expand_archive(
                 assert isinstance(mem, tarfile.TarInfo)
                 os.chmod(dest_filepath, mem.mode)
                 os.utime(dest_filepath, (mem.mtime, mem.mtime))
-        if _is_dir(mem) and is_tar:
+        elif _is_symlink(mem):
+            os.symlink(mem.linkname, dest_filepath)
+        elif _is_hardlink(mem):
+            link_file = PurePosixPath(mem.linkname)
+            if link_file.is_absolute():
+                raise RuntimeError(f'Archive member [{mem.name}] is a hard-link pointing to an absolute path [{mem.linkname}]')
+            link_file = dest / link_file
+            os.link(link_file, dest_filepath, follow_symlinks=False)
+        elif _is_dir(mem) and is_tar:
             assert isinstance(mem, tarfile.TarInfo)
-            dirs.append((mem, Path(dest_filepath)))
+            dest_filepath.mkdir(exist_ok=True, parents=True)
+            dirs.append((mem, dest_filepath))
 
     dirs.sort(key=lambda pair: pair[1])
     dirs.reverse()

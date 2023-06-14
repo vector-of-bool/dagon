@@ -8,6 +8,8 @@ import pytest
 from dagon import ar
 
 PKG_ROOT = Path(__file__).absolute().parent.parent
+REPO_ROOT = PKG_ROOT.parent
+DATA_DIR = REPO_ROOT / 'data'
 
 
 @pytest.mark.asyncio
@@ -68,3 +70,16 @@ async def test_zip_create_expand(tmp_path: Path) -> None:
     await ar.expand(zip_path, destination=exp_dir, if_exists='merge', if_file_exists='replace')
 
     await ar.expand(zip_path, destination=exp_dir, if_exists='merge', if_file_exists='keep')
+
+
+@pytest.mark.asyncio
+async def test_expand_weird(tmp_path: Path) -> None:
+    weird_dir = tmp_path / 'weird-content'
+    await ar.expand(DATA_DIR / 'weird.tar', destination=weird_dir)
+    assert weird_dir.joinpath('evil-link').is_symlink()
+    assert weird_dir.joinpath('okay-link').is_symlink()
+    assert weird_dir.joinpath('also-foo.txt').stat().st_ino == weird_dir.joinpath('foo.txt').stat().st_ino
+
+@pytest.mark.asyncio
+async def test_expand_many_small(tmp_path: Path) -> None:
+    await ar.expand(DATA_DIR / 'many-small.tbz', destination=tmp_path, if_exists='merge')
