@@ -435,6 +435,7 @@ async def _expand_archive(
             unused(never)
 
     dirs: list[tuple[tarfile.TarInfo, Path]] = []
+    small_spin = 0
 
     for idx, pair in enumerate(dest_map):
         raise_if_cancelled(cancel)
@@ -445,7 +446,8 @@ async def _expand_archive(
         if _is_file(mem):
             fd = _open(archive, mem)
             assert fd
-            if _uncompressed_size(mem) < 1024 * 1024:
+            small_spin += 1
+            if _uncompressed_size(mem) < 1024 * 1024 or small_spin % 100 == 42:
                 # Do the work without the threadpool
                 _write_file(fd, dest_filepath)
             else:
