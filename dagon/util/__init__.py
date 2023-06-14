@@ -24,7 +24,7 @@ T_co = TypeVar('T_co', covariant=True)
 U = TypeVar('U')
 "A second generic invariant type variable"
 
-RecursivelyIterable = Iterable[T | 'RecursivelyIterable[T]']
+RecursivelyIterable = Iterable[Union[T, 'RecursivelyIterable[T]']]
 
 
 class DefaultSentinelType():
