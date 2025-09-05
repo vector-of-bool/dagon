@@ -1,0 +1,38 @@
+on:
+  push:
+    branches:
+      - feature/ci-publish
+
+jobs:
+  build-package:
+    name: Build the Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with: { version: 0.8.15 }
+      - name: Build
+        run: uv run make build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Distribution
+          path: dist/
+
+  pypi-publish:
+    name: Upload to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    needs: [build-package]
+    steps:
+      - name: Get the Distribution
+        uses: actions/download-artifact
+        with:
+          name: Distribution
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
