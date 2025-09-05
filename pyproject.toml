@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [{ name = "vector-of-bool", email = "vectorofbool@gmail.com" }]
 requires-python = ">=3.13"
 dependencies = []
-classifiers = ["Private :: Do not upload"]
+classifiers = ["Development Status :: 1 - Planning"]
 
 [tool.uv.build-backend]
 namespace = true
