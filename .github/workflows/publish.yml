@@ -29,7 +29,7 @@ jobs:
     needs: [build-package]
     steps:
       - name: Get the Distribution
-        uses: actions/download-artifact
+        uses: actions/download-artifact@v5
         with:
           name: Distribution
       - name: Publish to PyPI
