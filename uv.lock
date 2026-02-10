@@ -148,7 +148,7 @@ wheels = [
 
 [[package]]
 name = "dagon"
-version = "0.11.0"
+version = "0.0.0a2"
 source = { editable = "." }
 
 [package.dev-dependencies]
