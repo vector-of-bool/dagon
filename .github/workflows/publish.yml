@@ -1,7 +1,7 @@
 on:
   push:
-    branches:
-      - feature/ci-publish
+    tags:
+      - "v[0-9]*.*"
 
 jobs:
   build-package:
